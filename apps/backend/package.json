@@ -1,0 +1,136 @@
+{
+  "name": "backend",
+  "version": "0.1.0",
+  "description": "Home Services marketplace API (NestJS modular monolith)",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "start:dev": "nest start --watch",
+    "start:prod": "node dist/main.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
+    "test:cov": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
+    "test:e2e": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-e2e.json",
+    "prebuild": "prisma generate",
+    "postinstall": "prisma generate",
+    "prisma:generate": "prisma generate",
+    "prisma:validate": "prisma validate",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate:status": "prisma migrate status",
+    "db:studio": "prisma studio",
+    "admin:bootstrap": "node dist/cli/admin.cli.js bootstrap",
+    "admin:reset-password": "node dist/cli/admin.cli.js reset-password",
+    "test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-integration.json",
+    "test:integration:redis": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-integration.json redis",
+    "test:integration:postgres": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-integration.json postgres",
+    "check:local": "node scripts/check-local.mjs",
+    "tokens:purge": "node dist/cli/purge-tokens.cli.js",
+    "db:seed": "node dist/cli/seed-catalog.cli.js",
+    "test:integration:workers": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-integration.json workers-catalog",
+    "db:migrate:test": "node scripts/migrate-test-db.mjs deploy",
+    "db:migrate:test:status": "node scripts/migrate-test-db.mjs status",
+    "db:migrate:test:resolve-applied": "node scripts/migrate-test-db.mjs resolve-applied",
+    "db:migrate:test:resolve-rolled-back": "node scripts/migrate-test-db.mjs resolve-rolled-back",
+    "test:integration:bookings": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-integration.json bookings",
+    "test:integration:payments": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-integration.json payments-",
+    "test:integration:realtime": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-integration.json realtime-",
+    "test:integration:files": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-integration.json storage-files file-lifecycle abandoned-uploads notifications.integration offers.integration",
+    "test:integration:admin": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-integration.json admin-operations audit-and-admin-auth disputes.integration reviews.integration reports.integration",
+    "test:s3-smoke": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-s3-smoke.json"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1156.0",
+    "@aws-sdk/s3-request-presigner": "^3.1156.0",
+    "@nestjs/common": "^12.1.3",
+    "@nestjs/config": "^12.0.1",
+    "@nestjs/core": "^12.1.3",
+    "@nestjs/platform-express": "^12.1.3",
+    "@nestjs/platform-socket.io": "^12.2.0",
+    "@nestjs/swagger": "^12.0.2",
+    "@nestjs/websockets": "^12.2.0",
+    "@node-rs/argon2": "^2.2.2",
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "bullmq": "^6.4.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "dotenv": "^18.0.8",
+    "firebase-admin": "^14.5.0",
+    "helmet": "^8.3.0",
+    "ioredis": "^6.0.0",
+    "jose": "^6.2.13",
+    "libphonenumber-js": "^1.13.15",
+    "nestjs-pino": "^5.3.1",
+    "pg": "^8.23.1",
+    "pino": "^10.4.0",
+    "pino-http": "^11.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "socket.io": "^4.8.4"
+  },
+  "jest": {
+    "preset": "ts-jest/presets/default-esm",
+    "extensionsToTreatAsEsm": [
+      ".ts"
+    ],
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "moduleNameMapper": {
+      "^(\\.{1,2}/.*)\\.js$": "$1"
+    },
+    "transform": {
+      "^.+\\.ts$": [
+        "ts-jest",
+        {
+          "tsconfig": "<rootDir>/../tsconfig.json",
+          "useESM": true,
+          "diagnostics": {
+            "ignoreCodes": [
+              151002
+            ]
+          }
+        }
+      ]
+    },
+    "collectCoverageFrom": [
+      "**/*.ts",
+      "!main.ts",
+      "!**/*.module.ts",
+      "!generated/**",
+      "!cli/**"
+    ],
+    "coverageDirectory": "../coverage",
+    "testEnvironment": "node",
+    "testTimeout": 30000
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^12.0.8",
+    "@nestjs/testing": "^12.1.3",
+    "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "@types/supertest": "^7.2.1",
+    "jest": "^30.5.2",
+    "pino-pretty": "^13.2.0",
+    "prisma": "^7.10.1",
+    "socket.io-client": "^4.8.4",
+    "supertest": "^7.3.1",
+    "ts-jest": "^29.4.15",
+    "typescript": "~5.9"
+  },
+  "type": "module"
+}

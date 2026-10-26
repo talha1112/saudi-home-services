@@ -1,0 +1,11 @@
+{
+  "_comment": "The exact JSON the customer app's PickedLocation.toBookingFields() produces for the input in customer_app/test/booking_location_contract_test.dart. Both that Flutter test and the backend's booking-location integration spec read this file, so the app and the API cannot drift apart.",
+  "fields": {
+    "addressLine": "King Fahd Rd, Al Olaya, Riyadh 12211",
+    "district": "Al Olaya",
+    "building": "12, Unit 4, Floor 2",
+    "locationNotes": "Ring the bell twice",
+    "latitude": 24.7136,
+    "longitude": 46.6753
+  }
+}

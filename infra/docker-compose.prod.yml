@@ -1,0 +1,21 @@
+# PRODUCTION override. Use together with the base file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# PostgreSQL and Redis publish NO ports: they are reachable only by containers on the
+# private `backend` network (for example the API container, which should also join a
+# separate public-facing network of its own). Do not add `ports:` here.
+# Real production secrets must come from the host's secret store / CI, never from git.
+# In production prefer managed PostgreSQL/Redis; this file is for single-host setups.
+
+services:
+  postgres:
+    ports: !reset []
+
+  redis:
+    ports: !reset []
+
+networks:
+  backend:
+    # No route to the outside world; only attached containers can reach the data stores.
+    internal: true

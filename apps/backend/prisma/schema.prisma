@@ -1,0 +1,1497 @@
+// Foundation schema: identity, account profiles, session revocation and audit.
+// Marketplace tables (services, bookings, quotes, payments, ...) come in later migrations.
+//
+// Conventions
+// - UUID v7 primary keys (time-ordered, index friendly).
+// - snake_case table and column names in PostgreSQL, camelCase in the Prisma client.
+// - All timestamps are timestamptz.
+// - Secrets are never stored in clear: only hashes (password, refresh token).
+// - One-time codes (OTP) are NOT stored here; they live hashed with a TTL in Redis.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserStatus {
+  PENDING_VERIFICATION // created, phone not verified yet
+  ACTIVE
+  SUSPENDED // blocked by an admin; cannot sign in
+  DEACTIVATED // closed by the user or an admin; data retained
+}
+
+enum Role {
+  CUSTOMER
+  WORKER
+  ADMIN
+}
+
+enum Locale {
+  AR
+  EN
+}
+
+enum WorkerVerificationStatus {
+  NOT_SUBMITTED
+  SUBMITTED
+  UNDER_REVIEW
+  INFO_REQUIRED
+  APPROVED
+  REJECTED
+  SUSPENDED // approved earlier, blocked by an admin; keeps history, cannot take jobs
+}
+
+enum DocumentType {
+  NATIONAL_ID
+  IQAMA
+  PROFESSIONAL_LICENSE
+  CERTIFICATE
+  PHOTO
+  OTHER
+}
+
+enum DocumentStatus {
+  PENDING_UPLOAD // metadata registered, file not confirmed in storage yet
+  UPLOADED
+  ACCEPTED
+  REJECTED
+}
+
+enum VerificationAction {
+  SUBMITTED
+  REVIEW_STARTED
+  INFO_REQUESTED
+  APPROVED
+  REJECTED
+  SUSPENDED
+  REINSTATED
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+/// A person with an account. Roles and profiles hang off this single row, so one
+/// person can be both a customer and a worker without a second account.
+model User {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  /// E.164 format, e.g. +966501234567. Sign-in identifier for customers and workers.
+  /// Null only for admin accounts, which sign in with email + password (a CHECK
+  /// constraint requires a phone or an email).
+  phone           String?   @unique @db.VarChar(20)
+  phoneVerifiedAt DateTime? @map("phone_verified_at") @db.Timestamptz(3)
+
+  /// Optional contact/recovery address; store lower-cased.
+  email           String?   @unique @db.VarChar(254)
+  emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz(3)
+
+  /// Argon2/bcrypt hash. Null for people who only sign in with a one-time code.
+  passwordHash       String?   @map("password_hash") @db.VarChar(255)
+  /// Set for bootstrapped/reset admin passwords; the account may only change its password until cleared.
+  mustChangePassword Boolean   @default(false) @map("must_change_password")
+  passwordChangedAt  DateTime? @map("password_changed_at") @db.Timestamptz(3)
+
+  fullName   String? @map("full_name") @db.VarChar(120)
+  fullNameAr String? @map("full_name_ar") @db.VarChar(120)
+  locale     Locale  @default(AR)
+
+  status       UserStatus @default(PENDING_VERIFICATION)
+  /// Why the account is SUSPENDED/DEACTIVATED (visible to admins only).
+  statusReason String?    @map("status_reason") @db.VarChar(500)
+  lastLoginAt  DateTime?  @map("last_login_at") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  roles                   UserRole[]
+  customerProfile         CustomerProfile?
+  workerProfile           WorkerProfile?
+  refreshTokens           RefreshToken[]
+  auditLogs               AuditLog[]                   @relation("AuditActor")
+  grantedRoles            UserRole[]                   @relation("RoleGrantedBy")
+  reviewedDocuments       WorkerVerificationDocument[] @relation("DocumentReviewer")
+  verificationEventsActed WorkerVerificationEvent[]    @relation("VerificationActor")
+  bookings                Booking[]                    @relation("BookingCustomer")
+  bookingEventsActed      BookingEvent[]               @relation("BookingEventActor")
+  cancellationsMade       BookingCancellation[]        @relation("CancelledBy")
+  pricingSettingsCreated  PricingSetting[]             @relation("PricingSettingAuthor")
+  paymentAttempts         PaymentAttempt[]             @relation("PaymentCustomer")
+  refundsRequested        PaymentRefund[]              @relation("RefundRequester")
+  ledgerEntriesCreated    LedgerEntry[]                @relation("LedgerAuthor")
+  chatMessagesSent        ChatMessage[]                @relation("ChatSender")
+  supportThread           SupportThread?
+  supportMessagesSent     SupportMessage[]             @relation("SupportSender")
+  chatStates              ChatParticipantState[]       @relation("ChatParticipant")
+  notifications           Notification[]               @relation("NotificationRecipient")
+  deviceTokens            DeviceToken[]                @relation("DeviceOwner")
+  offersCreated           Offer[]                      @relation("OfferCreator")
+  offersUpdated           Offer[]                      @relation("OfferUpdater")
+  offerEvents             OfferEvent[]                 @relation("OfferEventActor")
+  disputesOpened          Dispute[]                    @relation("DisputeOpener")
+  disputesAssigned        Dispute[]                    @relation("DisputeHandler")
+  disputeEventsActed      DisputeEvent[]               @relation("DisputeEventActor")
+  disputeEvidenceAdded    DisputeEvidence[]            @relation("EvidenceAdder")
+  reviewsWritten          Review[]                     @relation("ReviewAuthor")
+  reviewEventsActed       ReviewEvent[]                @relation("ReviewEventActor")
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("users")
+}
+
+/// Which roles a user holds. One row per (user, role).
+model UserRole {
+  userId String @map("user_id") @db.Uuid
+  role   Role
+
+  grantedAt   DateTime @default(now()) @map("granted_at") @db.Timestamptz(3)
+  /// Null when the role was granted by the system (e.g. self sign-up as customer).
+  grantedById String?  @map("granted_by_id") @db.Uuid
+
+  user      User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  grantedBy User? @relation("RoleGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+
+  @@id([userId, role])
+  @@index([role])
+  @@index([grantedById])
+  @@map("user_roles")
+}
+
+// ---------------------------------------------------------------------------
+// Account profiles (exist only when the matching UserRole exists)
+// ---------------------------------------------------------------------------
+
+model CustomerProfile {
+  id     String @id @default(uuid(7)) @db.Uuid
+  userId String @unique @map("user_id") @db.Uuid
+
+  marketingOptIn Boolean @default(false) @map("marketing_opt_in")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("customer_profiles")
+}
+
+model WorkerProfile {
+  id     String @id @default(uuid(7)) @db.Uuid
+  userId String @unique @map("user_id") @db.Uuid
+
+  bio               String? @db.VarChar(1000)
+  /// Null until the worker fills it in during onboarding.
+  yearsOfExperience Int?    @map("years_of_experience") @db.SmallInt
+
+  verificationStatus      WorkerVerificationStatus @default(NOT_SUBMITTED) @map("verification_status")
+  verificationSubmittedAt DateTime?                @map("verification_submitted_at") @db.Timestamptz(3)
+  verifiedAt              DateTime?                @map("verified_at") @db.Timestamptz(3)
+  /// Message shown to the applicant on INFO_REQUIRED / REJECTED.
+  verificationNote        String?                  @map("verification_note") @db.VarChar(1000)
+
+  /// Worker is currently accepting requests.
+  isOnline          Boolean @default(false) @map("is_online")
+  acceptsUrgentJobs Boolean @default(true) @map("accepts_urgent_jobs")
+
+  /// Cached from PUBLISHED reviews only (recomputed from the reviews table under a lock, never incremented).
+  ratingCount Int @default(0) @map("rating_count")
+  ratingSum   Int @default(0) @map("rating_sum")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  services           WorkerService[]
+  serviceAreas       WorkerServiceArea[]
+  availability       WorkerAvailability[]
+  documents          WorkerVerificationDocument[]
+  verificationEvents WorkerVerificationEvent[]
+  quotes             Quote[]
+  assignedBookings   Booking[]
+  reviews            Review[]
+
+  @@index([verificationStatus])
+  @@index([isOnline])
+  @@map("worker_profiles")
+}
+
+// ---------------------------------------------------------------------------
+// Sessions
+// ---------------------------------------------------------------------------
+
+/// One row per issued refresh token. Rotating on every use and keeping the chain
+/// (familyId / replacedById) lets the API detect token reuse and revoke the whole family.
+model RefreshToken {
+  id     String @id @default(uuid(7)) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+
+  /// SHA-256 (hex) of the opaque token. The token itself is never stored.
+  tokenHash   String @unique @map("token_hash") @db.Char(64)
+  /// All tokens descended from one sign-in share a family (= one session).
+  familyId    String @map("family_id") @db.Uuid
+  /// The role this session acts as (customer app, worker app or admin portal).
+  sessionRole Role   @map("session_role")
+
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(3)
+  usedAt       DateTime? @map("used_at") @db.Timestamptz(3)
+  /// Token issued when this one was rotated.
+  replacedById String?   @unique @map("replaced_by_id") @db.Uuid
+
+  userAgent String? @map("user_agent") @db.VarChar(512)
+  ipAddress String? @map("ip_address") @db.VarChar(45)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replacedBy RefreshToken? @relation("TokenRotation", fields: [replacedById], references: [id], onDelete: SetNull)
+  replaces   RefreshToken? @relation("TokenRotation")
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Audit
+// ---------------------------------------------------------------------------
+
+/// Append-only record of security-relevant and admin actions. Rows are never updated.
+model AuditLog {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  /// Null for system/background actions. Kept (set null) if the actor is deleted.
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  /// Dotted verb, e.g. "user.suspended", "worker.verification.approved".
+  action      String  @db.VarChar(100)
+  entityType  String  @map("entity_type") @db.VarChar(60)
+  entityId    String? @map("entity_id") @db.VarChar(64)
+
+  /// Small, non-sensitive context (before/after status, reason). Never secrets or personal documents.
+  metadata  Json?
+  requestId String? @map("request_id") @db.VarChar(64)
+  ipAddress String? @map("ip_address") @db.VarChar(45)
+  userAgent String? @map("user_agent") @db.VarChar(512)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  actor User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([actorUserId, createdAt])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Service catalog and launch cities (reference data, managed through the admin API)
+// ---------------------------------------------------------------------------
+
+/// A city the platform operates in. Rows, not code, decide where we are live.
+model City {
+  id        String  @id @default(uuid(7)) @db.Uuid
+  /// Stable machine name, e.g. "riyadh".
+  slug      String  @unique @db.VarChar(60)
+  nameEn    String  @map("name_en") @db.VarChar(100)
+  nameAr    String  @map("name_ar") @db.VarChar(100)
+  /// Only active cities are offered to customers and workers.
+  isActive  Boolean @default(true) @map("is_active")
+  sortOrder Int     @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  serviceAreas WorkerServiceArea[]
+  bookings     Booking[]
+  offers       Offer[]
+
+  @@index([isActive, sortOrder])
+  @@map("cities")
+}
+
+model ServiceCategory {
+  id            String  @id @default(uuid(7)) @db.Uuid
+  slug          String  @unique @db.VarChar(60)
+  nameEn        String  @map("name_en") @db.VarChar(100)
+  nameAr        String  @map("name_ar") @db.VarChar(100)
+  descriptionEn String? @map("description_en") @db.VarChar(1000)
+  descriptionAr String? @map("description_ar") @db.VarChar(1000)
+  /// Key the apps map to a bundled icon; no URLs or files here.
+  iconKey       String? @map("icon_key") @db.VarChar(60)
+  isActive      Boolean @default(true) @map("is_active")
+  sortOrder     Int     @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  services Service[]
+
+  @@index([isActive, sortOrder])
+  @@map("service_categories")
+}
+
+/// A bookable kind of work inside a category (e.g. "AC repair" in Air Conditioning).
+model Service {
+  id            String  @id @default(uuid(7)) @db.Uuid
+  categoryId    String  @map("category_id") @db.Uuid
+  slug          String  @unique @db.VarChar(80)
+  nameEn        String  @map("name_en") @db.VarChar(120)
+  nameAr        String  @map("name_ar") @db.VarChar(120)
+  descriptionEn String? @map("description_en") @db.VarChar(1000)
+  descriptionAr String? @map("description_ar") @db.VarChar(1000)
+  isActive      Boolean @default(true) @map("is_active")
+  sortOrder     Int     @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  category ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  workers  WorkerService[]
+  bookings Booking[]
+  offers   Offer[]
+
+  @@index([categoryId, isActive, sortOrder])
+  @@map("services")
+}
+
+// ---------------------------------------------------------------------------
+// Worker onboarding
+// ---------------------------------------------------------------------------
+
+/// A service the worker offers, with their own experience in it.
+model WorkerService {
+  workerProfileId   String   @map("worker_profile_id") @db.Uuid
+  serviceId         String   @map("service_id") @db.Uuid
+  yearsOfExperience Int?     @map("years_of_experience") @db.SmallInt
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  worker  WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  service Service       @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+
+  @@id([workerProfileId, serviceId])
+  @@index([serviceId])
+  @@map("worker_services")
+}
+
+/// A city the worker is willing to work in.
+model WorkerServiceArea {
+  workerProfileId String   @map("worker_profile_id") @db.Uuid
+  cityId          String   @map("city_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  worker WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  city   City          @relation(fields: [cityId], references: [id], onDelete: Restrict)
+
+  @@id([workerProfileId, cityId])
+  @@index([cityId])
+  @@map("worker_service_areas")
+}
+
+/// Weekly recurring working window in Saudi local time (Asia/Riyadh).
+/// day_of_week: 0 = Sunday ... 6 = Saturday. Minutes count from midnight (0-1440).
+model WorkerAvailability {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  workerProfileId String   @map("worker_profile_id") @db.Uuid
+  dayOfWeek       Int      @map("day_of_week") @db.SmallInt
+  startMinute     Int      @map("start_minute") @db.SmallInt
+  endMinute       Int      @map("end_minute") @db.SmallInt
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  worker WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([workerProfileId, dayOfWeek, startMinute])
+  @@index([workerProfileId])
+  @@map("worker_availability")
+}
+
+/// METADATA about a private verification document. The file itself lives in object
+/// storage (behind the DocumentStorage interface); no file content or URL is stored here.
+model WorkerVerificationDocument {
+  id                String         @id @default(uuid(7)) @db.Uuid
+  workerProfileId   String         @map("worker_profile_id") @db.Uuid
+  type              DocumentType
+  status            DocumentStatus @default(PENDING_UPLOAD)
+  /// Opaque key in object storage (never a public URL).
+  storageKey        String         @unique @map("storage_key") @db.VarChar(512)
+  fileName          String         @map("file_name") @db.VarChar(255)
+  mimeType          String         @map("mime_type") @db.VarChar(100)
+  sizeBytes         Int            @map("size_bytes")
+  checksumSha256    String?        @map("checksum_sha256") @db.Char(64)
+  /// Result of the malware scan. NOT_SCANNED is not a clean bill of health (see docs/STORAGE_NOTIFICATIONS_OFFERS.md).
+  scanStatus        ScanStatus     @default(NOT_SCANNED) @map("scan_status")
+  /// Set when the server itself read the stored bytes and checked size and file signature.
+  contentVerifiedAt DateTime?      @map("content_verified_at") @db.Timestamptz(3)
+  /// Expiry printed on the document (e.g. iqama), if any.
+  expiresOn         DateTime?      @map("expires_on") @db.Date
+  reviewNote        String?        @map("review_note") @db.VarChar(500)
+  reviewedById      String?        @map("reviewed_by_id") @db.Uuid
+  reviewedAt        DateTime?      @map("reviewed_at") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  worker   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  reviewer User?         @relation("DocumentReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([workerProfileId, type])
+  @@index([reviewedById])
+  @@map("worker_verification_documents")
+}
+
+/// Append-only history of every verification status change, with who and why.
+model WorkerVerificationEvent {
+  id              String                   @id @default(uuid(7)) @db.Uuid
+  workerProfileId String                   @map("worker_profile_id") @db.Uuid
+  action          VerificationAction
+  fromStatus      WorkerVerificationStatus @map("from_status")
+  toStatus        WorkerVerificationStatus @map("to_status")
+  /// The worker for SUBMITTED, an admin for review decisions. Kept (null) if the user is deleted.
+  actorUserId     String?                  @map("actor_user_id") @db.Uuid
+  reason          String?                  @db.VarChar(1000)
+  createdAt       DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  worker WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  actor  User?         @relation("VerificationActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workerProfileId, createdAt])
+  @@index([actorUserId])
+  @@map("worker_verification_events")
+}
+
+// ---------------------------------------------------------------------------
+// Bookings and quotations
+//
+// MONEY: every amount is an integer number of halalas (1 SAR = 100 halalas). Never floats.
+// Rates are integer basis points (1500 = 15.00%). Amounts are computed on the server from
+// the pricing settings in force when a quote is created; clients never send VAT, commission
+// or totals.
+// ---------------------------------------------------------------------------
+
+enum BookingStatus {
+  OPEN // request published; eligible workers may quote
+  PAYMENT_PENDING // the customer accepted one quote; waiting for payment (next phase)
+  CONFIRMED // paid; the worker is booked
+  IN_PROGRESS // the worker started the job
+  COMPLETED
+  CANCELLED
+  EXPIRED // nobody was chosen before the request expired
+}
+
+enum QuoteStatus {
+  SUBMITTED
+  ACCEPTED
+  REJECTED // another quote was chosen, or the booking ended
+  WITHDRAWN // the worker took it back
+  EXPIRED // its validity ran out
+}
+
+enum CancellationReason {
+  CHANGED_MIND
+  FOUND_ALTERNATIVE
+  PRICE_TOO_HIGH
+  SCHEDULE_CONFLICT
+  PROBLEM_RESOLVED
+  DUPLICATE_REQUEST
+  OTHER
+  ADMIN_ACTION
+}
+
+enum BookingEventType {
+  BOOKING_CREATED
+  QUOTE_SUBMITTED
+  QUOTE_REVISED
+  QUOTE_WITHDRAWN
+  QUOTE_ACCEPTED
+  QUOTE_REJECTED
+  QUOTE_EXPIRED
+  PAYMENT_CONFIRMED
+  WORK_STARTED
+  WORK_COMPLETED
+  BOOKING_CANCELLED
+  BOOKING_EXPIRED
+}
+
+enum PhotoStatus {
+  PENDING_UPLOAD
+  UPLOADED
+}
+
+/// Versioned, append-only business settings. The newest row whose effective_from has passed
+/// applies to NEW quotes; quotes and bookings keep the rates they were created with.
+model PricingSetting {
+  id                      String   @id @default(uuid(7)) @db.Uuid
+  /// VAT in basis points of the service price (1500 = 15%).
+  vatRateBps              Int      @map("vat_rate_bps")
+  /// Platform commission in basis points of the service price, deducted from the worker.
+  commissionRateBps       Int      @map("commission_rate_bps")
+  /// Lowest service price (before VAT) a worker may quote.
+  minServiceChargeHalalas Int      @map("min_service_charge_halalas")
+  /// True for development placeholder rows that the business has not confirmed.
+  isProvisional           Boolean  @default(false) @map("is_provisional")
+  note                    String?  @db.VarChar(500)
+  effectiveFrom           DateTime @default(now()) @map("effective_from") @db.Timestamptz(3)
+  createdById             String?  @map("created_by_id") @db.Uuid
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  createdBy User?   @relation("PricingSettingAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  quotes    Quote[]
+
+  @@index([effectiveFrom])
+  @@map("pricing_settings")
+}
+
+model Booking {
+  id         String        @id @default(uuid(7)) @db.Uuid
+  /// Human-friendly code shown to people, e.g. BK-7H3K9Q2M.
+  reference  String        @unique @db.VarChar(16)
+  customerId String        @map("customer_id") @db.Uuid
+  serviceId  String        @map("service_id") @db.Uuid
+  cityId     String        @map("city_id") @db.Uuid
+  status     BookingStatus @default(OPEN)
+
+  problemDescription String   @map("problem_description") @db.VarChar(2000)
+  isUrgent           Boolean  @default(false) @map("is_urgent")
+  preferredStartAt   DateTime @map("preferred_start_at") @db.Timestamptz(3)
+  preferredEndAt     DateTime @map("preferred_end_at") @db.Timestamptz(3)
+
+  // Location SNAPSHOT: a later edit of a saved address can never change an existing booking.
+  // Workers see only city + district until the booking is CONFIRMED.
+  district      String? @db.VarChar(120)
+  addressLine   String  @map("address_line") @db.VarChar(255)
+  building      String? @db.VarChar(120)
+  locationNotes String? @map("location_notes") @db.VarChar(500)
+  latitude      Float?
+  longitude     Float?
+
+  /// When the OPEN request stops accepting quotes.
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  // Filled in when a quote is accepted.
+  acceptedQuoteId String?   @unique @map("accepted_quote_id") @db.Uuid
+  workerProfileId String?   @map("worker_profile_id") @db.Uuid
+  acceptedAt      DateTime? @map("accepted_at") @db.Timestamptz(3)
+  /// Payment must be confirmed before this moment (enforced by the payments phase).
+  paymentDueAt    DateTime? @map("payment_due_at") @db.Timestamptz(3)
+  confirmedAt     DateTime? @map("confirmed_at") @db.Timestamptz(3)
+  startedAt       DateTime? @map("started_at") @db.Timestamptz(3)
+  completedAt     DateTime? @map("completed_at") @db.Timestamptz(3)
+  cancelledAt     DateTime? @map("cancelled_at") @db.Timestamptz(3)
+
+  /// ONLINE (a provider confirms the payment) or CASH (the customer pays the worker in person). NULL = not chosen / confirmed before this existed.
+  paymentMethod   String?   @map("payment_method") @db.VarChar(10)
+  /// CASH only: when the worker confirmed receiving the cash.
+  cashCollectedAt DateTime? @map("cash_collected_at") @db.Timestamptz(3)
+
+  // Money snapshot copied from the accepted quote (halalas / basis points).
+  currency                String @default("SAR") @db.VarChar(3)
+  serviceAmountHalalas    Int?   @map("service_amount_halalas")
+  vatAmountHalalas        Int?   @map("vat_amount_halalas")
+  totalAmountHalalas      Int?   @map("total_amount_halalas")
+  commissionAmountHalalas Int?   @map("commission_amount_halalas")
+  workerPayoutHalalas     Int?   @map("worker_payout_halalas")
+  vatRateBps              Int?   @map("vat_rate_bps")
+  commissionRateBps       Int?   @map("commission_rate_bps")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  customer        User                   @relation("BookingCustomer", fields: [customerId], references: [id], onDelete: Restrict)
+  service         Service                @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  city            City                   @relation(fields: [cityId], references: [id], onDelete: Restrict)
+  worker          WorkerProfile?         @relation(fields: [workerProfileId], references: [id], onDelete: Restrict)
+  acceptedQuote   Quote?                 @relation("AcceptedQuote", fields: [acceptedQuoteId], references: [id], onDelete: Restrict)
+  quotes          Quote[]                @relation("BookingQuotes")
+  events          BookingEvent[]
+  photos          BookingPhoto[]
+  cancellation    BookingCancellation?
+  paymentAttempts PaymentAttempt[]
+  paymentRefunds  PaymentRefund[]
+  chatMessages    ChatMessage[]
+  chatStates      ChatParticipantState[]
+  outboxEvents    RealtimeOutboxEvent[]
+  disputes        Dispute[]
+  review          Review?
+  ledgerEntries   LedgerEntry[]
+
+  @@index([customerId, status, createdAt])
+  @@index([status, cityId, serviceId, createdAt])
+  @@index([status, expiresAt])
+  @@index([status, paymentDueAt])
+  @@index([createdAt]) // date-range reports (the partial completed_at / cancelled_at indexes are in the migration only)
+  @@index([workerProfileId, status])
+  @@map("bookings")
+}
+
+model Quote {
+  id              String      @id @default(uuid(7)) @db.Uuid
+  bookingId       String      @map("booking_id") @db.Uuid
+  workerProfileId String      @map("worker_profile_id") @db.Uuid
+  status          QuoteStatus @default(SUBMITTED)
+  /// Incremented on every edit; accepting checks it so a customer accepts exactly what they saw.
+  version         Int         @default(1)
+
+  // Offer, as chosen by the worker.
+  priceHalalas             Int      @map("price_halalas")
+  proposedStartAt          DateTime @map("proposed_start_at") @db.Timestamptz(3)
+  proposedEndAt            DateTime @map("proposed_end_at") @db.Timestamptz(3)
+  estimatedDurationMinutes Int?     @map("estimated_duration_minutes") @db.SmallInt
+  message                  String?  @db.VarChar(1000)
+  validUntil               DateTime @map("valid_until") @db.Timestamptz(3)
+
+  // Computed by the server from the pricing setting below.
+  pricingSettingId        String @map("pricing_setting_id") @db.Uuid
+  vatRateBps              Int    @map("vat_rate_bps")
+  commissionRateBps       Int    @map("commission_rate_bps")
+  vatAmountHalalas        Int    @map("vat_amount_halalas")
+  totalAmountHalalas      Int    @map("total_amount_halalas")
+  commissionAmountHalalas Int    @map("commission_amount_halalas")
+  workerPayoutHalalas     Int    @map("worker_payout_halalas")
+
+  /// TRUE only while ACCEPTED, otherwise NULL. NULLs never collide in a unique index, so
+  /// @@unique([bookingId, isAccepted]) lets PostgreSQL itself refuse a second accepted quote.
+  isAccepted  Boolean?  @map("is_accepted")
+  acceptedAt  DateTime? @map("accepted_at") @db.Timestamptz(3)
+  withdrawnAt DateTime? @map("withdrawn_at") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  booking        Booking        @relation("BookingQuotes", fields: [bookingId], references: [id], onDelete: Cascade)
+  worker         WorkerProfile  @relation(fields: [workerProfileId], references: [id], onDelete: Restrict)
+  pricingSetting PricingSetting @relation(fields: [pricingSettingId], references: [id], onDelete: Restrict)
+  acceptedFor    Booking?       @relation("AcceptedQuote")
+  events         BookingEvent[]
+
+  @@unique([bookingId, workerProfileId])
+  @@unique([bookingId, isAccepted])
+  @@index([workerProfileId, status])
+  @@index([bookingId, status])
+  @@index([status, validUntil])
+  @@index([createdAt]) // date-range reports
+  @@map("quotes")
+}
+
+/// Append-only timeline of everything that happens to a booking and its quotes.
+model BookingEvent {
+  id            String           @id @default(uuid(7)) @db.Uuid
+  bookingId     String           @map("booking_id") @db.Uuid
+  type          BookingEventType
+  fromStatus    BookingStatus?   @map("from_status")
+  toStatus      BookingStatus?   @map("to_status")
+  quoteId       String?          @map("quote_id") @db.Uuid
+  /// Null for system actions (expiry, payment confirmation).
+  actorUserId   String?          @map("actor_user_id") @db.Uuid
+  actorRole     Role?            @map("actor_role")
+  /// The quote's service price at that moment, for quote events.
+  amountHalalas Int?             @map("amount_halalas")
+  note          String?          @db.VarChar(1000)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  booking Booking              @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  quote   Quote?               @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  actor   User?                @relation("BookingEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  outbox  RealtimeOutboxEvent?
+
+  @@index([bookingId, createdAt])
+  @@index([quoteId])
+  @@index([actorUserId])
+  @@map("booking_events")
+}
+
+/// Metadata of an optional problem photo. Bytes live in private object storage.
+model BookingPhoto {
+  id                String      @id @default(uuid(7)) @db.Uuid
+  bookingId         String      @map("booking_id") @db.Uuid
+  status            PhotoStatus @default(PENDING_UPLOAD)
+  storageKey        String      @unique @map("storage_key") @db.VarChar(512)
+  fileName          String      @map("file_name") @db.VarChar(255)
+  mimeType          String      @map("mime_type") @db.VarChar(100)
+  sizeBytes         Int         @map("size_bytes")
+  scanStatus        ScanStatus  @default(NOT_SCANNED) @map("scan_status")
+  contentVerifiedAt DateTime?   @map("content_verified_at") @db.Timestamptz(3)
+  createdAt         DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  booking  Booking           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  evidence DisputeEvidence[]
+
+  @@index([bookingId])
+  @@map("booking_photos")
+}
+
+/// Why and by whom a booking was cancelled (one row per cancelled booking).
+model BookingCancellation {
+  id                String             @id @default(uuid(7)) @db.Uuid
+  bookingId         String             @unique @map("booking_id") @db.Uuid
+  cancelledByUserId String?            @map("cancelled_by_user_id") @db.Uuid
+  cancelledByRole   Role               @map("cancelled_by_role")
+  reason            CancellationReason
+  note              String?            @db.VarChar(500)
+  /// Status before cancelling. PAYMENT_PENDING / CONFIRMED may need a refund or release later.
+  previousStatus    BookingStatus      @map("previous_status")
+  cancelledAt       DateTime           @default(now()) @map("cancelled_at") @db.Timestamptz(3)
+
+  booking     Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  cancelledBy User?   @relation("CancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+
+  @@index([cancelledByUserId])
+  @@map("booking_cancellations")
+}
+
+// ---------------------------------------------------------------------------
+// Payments, refunds and the financial ledger
+//
+// Provider-neutral: no real gateway is integrated. Money is integer halalas plus an explicit
+// currency. The agreed booking snapshot is immutable (database trigger); a payment attempt
+// copies it and can never choose its own amount. See docs/PAYMENTS_INTEGRATION.md.
+// ---------------------------------------------------------------------------
+
+enum PaymentStatus {
+  INITIATED // our row exists; the provider has not (yet) confirmed a session
+  PROCESSING // the provider created the session; the customer may be paying
+  SUCCEEDED // captured, the exact agreed amount, and applied to the booking (booking CONFIRMED)
+  CAPTURED_UNAPPLIED // money captured but NOT applied to the booking; needs reconciliation
+  FAILED
+  CANCELLED
+  EXPIRED
+}
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  IGNORED
+  FAILED
+}
+
+enum RefundStatus {
+  REQUESTED // asked for; NO money has moved
+  PROCESSING // handed to the provider (future phase)
+  SUCCEEDED // confirmed by the provider (future phase)
+  FAILED
+  CANCELLED
+}
+
+enum LedgerEntryType {
+  PAYMENT_CAPTURED // customer money captured and applied to a booking (+)
+  PAYMENT_CAPTURED_UNAPPLIED // customer money captured but not applied; held for reconciliation (+)
+  REFUND_COMPLETED // money returned to the customer (-); posted only once confirmed (future phase)
+  COMMISSION_ACCRUAL // reserved: not posted until the commission policy is approved
+  WORKER_EARNING_ACCRUAL // reserved: not posted until the earnings policy is approved
+  WORKER_PAYOUT // reserved: not posted until payouts are approved (-)
+  CORRECTION // reserved: compensating entry that reverses another entry
+}
+
+/// One try to collect the booking's agreed total. A booking may have many over its life (retries),
+/// but at most one OPEN (INITIATED or PROCESSING) at a time.
+model PaymentAttempt {
+  id                String        @id @default(uuid(7)) @db.Uuid
+  bookingId         String        @map("booking_id") @db.Uuid
+  customerId        String        @map("customer_id") @db.Uuid
+  /// 1, 2, 3 ... per booking.
+  attemptNumber     Int           @map("attempt_number")
+  /// Adapter name, e.g. "mock". Free text so a new provider needs no migration.
+  provider          String        @db.VarChar(40)
+  providerPaymentId String?       @map("provider_payment_id") @db.VarChar(128)
+  status            PaymentStatus @default(INITIATED)
+  /// TRUE while INITIATED or PROCESSING, otherwise NULL. NULLs never collide in a unique index, so
+  /// @@unique([bookingId, openSlot]) lets PostgreSQL itself refuse a second open attempt.
+  openSlot          Boolean?      @map("open_slot")
+
+  /// Copied from the booking's immutable snapshot. Never supplied by a client.
+  amountHalalas Int    @map("amount_halalas")
+  currency      String @db.VarChar(3)
+
+  /// Client-chosen key (Idempotency-Key header), unique per customer.
+  idempotencyKey     String  @map("idempotency_key") @db.VarChar(128)
+  /// SHA-256 of the meaningful request fields, to detect the same key with a different payload.
+  requestFingerprint String  @map("request_fingerprint") @db.Char(64)
+  /// TRUE for attempts created by the development mock provider. Never counted as real money.
+  isSimulated        Boolean @default(false) @map("is_simulated")
+
+  /// Hosted checkout address returned to the owning customer only.
+  checkoutUrl       String?   @map("checkout_url") @db.VarChar(1024)
+  checkoutExpiresAt DateTime? @map("checkout_expires_at") @db.Timestamptz(3)
+
+  /// What the provider reports it captured (may differ from amount_halalas in a faulty case).
+  capturedAmountHalalas Int?    @map("captured_amount_halalas")
+  capturedCurrency      String? @map("captured_currency") @db.VarChar(3)
+  /// Sum of refunds that are requested, in progress or done. CHECK: never above the captured amount.
+  refundReservedHalalas Int     @default(0) @map("refund_reserved_halalas")
+
+  failureCode          String?   @map("failure_code") @db.VarChar(60)
+  failureMessage       String?   @map("failure_message") @db.VarChar(255)
+  /// Why a captured payment was not applied (BOOKING_NOT_PAYABLE, DUPLICATE_PAYMENT, AMOUNT_MISMATCH ...).
+  reconciliationReason String?   @map("reconciliation_reason") @db.VarChar(60)
+  /// Provider time of the newest event applied, used to ignore older events that arrive late.
+  lastProviderEventAt  DateTime? @map("last_provider_event_at") @db.Timestamptz(3)
+
+  processingAt DateTime? @map("processing_at") @db.Timestamptz(3)
+  settledAt    DateTime? @map("settled_at") @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  booking       Booking               @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  customer      User                  @relation("PaymentCustomer", fields: [customerId], references: [id], onDelete: Restrict)
+  webhookEvents PaymentWebhookEvent[]
+  refunds       PaymentRefund[]
+  ledgerEntries LedgerEntry[]
+
+  @@unique([customerId, idempotencyKey])
+  @@unique([bookingId, attemptNumber])
+  @@unique([bookingId, openSlot])
+  @@unique([provider, providerPaymentId])
+  @@index([status, createdAt])
+  @@index([status, processingAt])
+  @@index([bookingId, status])
+  @@index([customerId, createdAt])
+  @@map("payment_attempts")
+}
+
+/// Inbox of VERIFIED provider events. The unique key makes a repeated delivery a no-op.
+model PaymentWebhookEvent {
+  id                String             @id @default(uuid(7)) @db.Uuid
+  provider          String             @db.VarChar(40)
+  /// Merchant/account the event belongs to, for providers with several accounts.
+  accountScope      String             @default("default") @map("account_scope") @db.VarChar(80)
+  providerEventId   String             @map("provider_event_id") @db.VarChar(128)
+  /// Normalised kind: PAYMENT_SUCCEEDED, PAYMENT_FAILED, PAYMENT_CANCELLED, PAYMENT_EXPIRED, UNKNOWN.
+  eventType         String             @map("event_type") @db.VarChar(40)
+  providerPaymentId String?            @map("provider_payment_id") @db.VarChar(128)
+  paymentAttemptId  String?            @map("payment_attempt_id") @db.Uuid
+  status            WebhookEventStatus @default(RECEIVED)
+  /// What processing decided, e.g. APPLIED, ALREADY_APPLIED, STALE_IGNORED, ORPHAN_UNKNOWN_PAYMENT.
+  outcome           String?            @db.VarChar(60)
+  /// Processing tries (a FAILED event can be retried).
+  attempts          Int                @default(0)
+
+  // Normalised, non-sensitive facts from the event. The raw payload is NOT stored.
+  amountHalalas Int?      @map("amount_halalas")
+  currency      String?   @db.VarChar(3)
+  occurredAt    DateTime? @map("occurred_at") @db.Timestamptz(3)
+  isSimulated   Boolean   @default(false) @map("is_simulated")
+  /// SHA-256 of the raw body that was signature-checked (null for simulated events).
+  payloadHash   String?   @map("payload_hash") @db.Char(64)
+
+  processingStartedAt DateTime? @map("processing_started_at") @db.Timestamptz(3)
+  lastError           String?   @map("last_error") @db.VarChar(500)
+  receivedAt          DateTime  @default(now()) @map("received_at") @db.Timestamptz(3)
+  processedAt         DateTime? @map("processed_at") @db.Timestamptz(3)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  paymentAttempt PaymentAttempt? @relation(fields: [paymentAttemptId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, accountScope, providerEventId])
+  @@index([status, receivedAt])
+  @@index([paymentAttemptId])
+  @@index([provider, providerPaymentId])
+  @@map("payment_webhook_events")
+}
+
+/// A request to return money. REQUESTED is only a request: nothing has been refunded until a
+/// provider confirms it (future phase).
+model PaymentRefund {
+  id            String       @id @default(uuid(7)) @db.Uuid
+  paymentId     String       @map("payment_id") @db.Uuid
+  bookingId     String       @map("booking_id") @db.Uuid
+  amountHalalas Int          @map("amount_halalas")
+  currency      String       @db.VarChar(3)
+  reason        String       @db.VarChar(500)
+  status        RefundStatus @default(REQUESTED)
+  requestedById String       @map("requested_by_id") @db.Uuid
+
+  idempotencyKey     String @map("idempotency_key") @db.VarChar(128)
+  requestFingerprint String @map("request_fingerprint") @db.Char(64)
+
+  provider         String?   @db.VarChar(40)
+  providerRefundId String?   @map("provider_refund_id") @db.VarChar(128)
+  failureCode      String?   @map("failure_code") @db.VarChar(60)
+  completedAt      DateTime? @map("completed_at") @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  payment       PaymentAttempt @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  booking       Booking        @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  requestedBy   User           @relation("RefundRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  ledgerEntries LedgerEntry[]
+
+  @@unique([requestedById, idempotencyKey])
+  @@unique([provider, providerRefundId])
+  @@index([status, createdAt])
+  @@index([paymentId])
+  @@index([bookingId])
+  @@map("payment_refunds")
+}
+
+/// Append-only journal of money movements. Rows are never updated or deleted (database trigger);
+/// a mistake is corrected by posting a CORRECTION entry that points at the entry it reverses.
+/// amount_halalas is signed: positive = money received from outside, negative = money paid out.
+/// Which entries exist, and any accrual/commission/payout posting, depends on accounting
+/// decisions that are NOT made yet; see docs/PAYMENTS_INTEGRATION.md.
+model LedgerEntry {
+  id              String          @id @default(uuid(7)) @db.Uuid
+  entryType       LedgerEntryType @map("entry_type")
+  amountHalalas   Int             @map("amount_halalas")
+  currency        String          @db.VarChar(3)
+  bookingId       String?         @map("booking_id") @db.Uuid
+  paymentId       String?         @map("payment_id") @db.Uuid
+  refundId        String?         @map("refund_id") @db.Uuid
+  /// The entry this one compensates (CORRECTION only).
+  reversesEntryId String?         @unique @map("reverses_entry_id") @db.Uuid
+  /// Stable key such as "payment:<id>:capture"; a repeated event cannot post twice.
+  idempotencyKey  String          @unique @map("idempotency_key") @db.VarChar(160)
+  sourceType      String          @map("source_type") @db.VarChar(40)
+  sourceId        String?         @map("source_id") @db.VarChar(64)
+  description     String          @db.VarChar(255)
+  isSimulated     Boolean         @default(false) @map("is_simulated")
+  createdById     String?         @map("created_by_id") @db.Uuid
+  postedAt        DateTime        @default(now()) @map("posted_at") @db.Timestamptz(3)
+
+  booking    Booking?        @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  payment    PaymentAttempt? @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  refund     PaymentRefund?  @relation(fields: [refundId], references: [id], onDelete: Restrict)
+  reverses   LedgerEntry?    @relation("LedgerReversal", fields: [reversesEntryId], references: [id], onDelete: Restrict)
+  reversedBy LedgerEntry?    @relation("LedgerReversal")
+  createdBy  User?           @relation("LedgerAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([bookingId, postedAt])
+  @@index([paymentId])
+  @@index([refundId])
+  @@index([sourceType, sourceId])
+  @@index([entryType, postedAt])
+  @@map("ledger_entries")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Phase 7: booking chat and the realtime outbox. Live GPS positions are NOT here on purpose:
+// they live only in Redis with a short expiry.
+// ---------------------------------------------------------------------------------------------
+
+/// One chat message between the booking's customer and its assigned worker. Append-only (a trigger
+/// rejects updates). `seq` is a gap-free per-booking number assigned under the booking row lock, so
+/// history order and "messages after N" recovery are stable. (bookingId, senderUserId, clientMessageId)
+/// makes a retried send return the original message instead of creating a second one.
+model ChatMessage {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  bookingId       String   @map("booking_id") @db.Uuid
+  seq             Int
+  senderUserId    String   @map("sender_user_id") @db.Uuid
+  /// CUSTOMER or WORKER (CHECK constraint); never taken from the client.
+  senderRole      Role     @map("sender_role")
+  clientMessageId String   @map("client_message_id") @db.VarChar(64)
+  /// Plain text, 1..2000 characters (CHECK constraint).
+  body            String   @db.VarChar(2000)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  booking  Booking           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  sender   User              @relation("ChatSender", fields: [senderUserId], references: [id], onDelete: Restrict)
+  evidence DisputeEvidence[]
+
+  @@unique([bookingId, seq])
+  @@unique([bookingId, senderUserId, clientMessageId])
+  @@index([senderUserId])
+  @@map("chat_messages")
+}
+
+/// How far each participant has been delivered / has read in one booking's chat (highest seq).
+/// Only ever moves forward (CHECKs + GREATEST in the service).
+model ChatParticipantState {
+  bookingId        String   @map("booking_id") @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  deliveredUpToSeq Int      @default(0) @map("delivered_up_to_seq")
+  readUpToSeq      Int      @default(0) @map("read_up_to_seq")
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  user    User    @relation("ChatParticipant", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([bookingId, userId])
+  @@index([userId])
+  @@map("chat_participant_states")
+}
+
+/// Transactional outbox: written in the same transaction as the booking_events row it announces, so a
+/// rolled-back change never produces an event. A job delivers it after commit (at-least-once; the
+/// payload carries the booking event id so receivers can de-duplicate). Holds only the minimal,
+/// non-sensitive payload. Rows are deleted after retention; dead rows (retries exhausted) are reported.
+model RealtimeOutboxEvent {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  bookingEventId String    @unique @map("booking_event_id") @db.Uuid
+  bookingId      String    @map("booking_id") @db.Uuid
+  payload        Json
+  attempts       Int       @default(0)
+  nextAttemptAt  DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  dispatchedAt   DateTime? @map("dispatched_at") @db.Timestamptz(3)
+  /// Set when retries are exhausted: no further attempts, an operator must look.
+  deadAt         DateTime? @map("dead_at") @db.Timestamptz(3)
+  /// Error CLASS only, never a payload or message text.
+  lastError      String?   @map("last_error") @db.VarChar(120)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  bookingEvent BookingEvent @relation(fields: [bookingEventId], references: [id], onDelete: Cascade)
+  booking      Booking      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@map("realtime_outbox_events")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Phase 8: private storage bookkeeping, notifications, device tokens and offers.
+// ---------------------------------------------------------------------------------------------
+
+enum ScanStatus {
+  /// No scanner is configured (or the file predates scanning). NOT a statement that the file is safe.
+  NOT_SCANNED
+  PENDING
+  CLEAN
+  INFECTED
+  ERROR
+}
+
+/// Objects waiting to be removed from private storage. Written in the same transaction that removes
+/// the metadata row; a job performs the provider call (idempotent, retried with backoff, parked when dead).
+model StorageDeletion {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  storageKey    String    @unique @map("storage_key") @db.VarChar(512)
+  reason        String    @db.VarChar(40)
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  completedAt   DateTime? @map("completed_at") @db.Timestamptz(3)
+  deadAt        DateTime? @map("dead_at") @db.Timestamptz(3)
+  /// Error class only, never a message or a URL.
+  lastError     String?   @map("last_error") @db.VarChar(120)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@map("storage_deletions")
+}
+
+/// What a scan job refers to.
+enum FileScanSubject {
+  BOOKING_PHOTO
+  WORKER_DOCUMENT
+}
+
+enum FileScanJobStatus {
+  QUEUED
+  /// Claimed by a scanner run; `locked_until` is its lease. An expired lease makes the job claimable again.
+  RUNNING
+  DONE
+  /// Gave up after the maximum attempts; the file is marked ERROR (never served).
+  DEAD
+}
+
+/// Malware-scan queue for confirmed uploads. A row is written in the same transaction that marks the file PENDING.
+/// Only a real scanner's verdict is ever copied to the file (compare-and-set from PENDING); nothing here marks a file clean by itself.
+/// `storage_key` is deliberately not a foreign key: the file row may be deleted while its job runs (the result then changes nothing).
+model FileScanJob {
+  id            String            @id @default(uuid(7)) @db.Uuid
+  storageKey    String            @unique @map("storage_key") @db.VarChar(512)
+  subject       FileScanSubject
+  subjectId     String            @map("subject_id") @db.Uuid
+  status        FileScanJobStatus @default(QUEUED)
+  /// Incremented on every claim; also the fencing token that stops a stale run from writing a result.
+  attempts      Int               @default(0)
+  nextAttemptAt DateTime          @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  lockedUntil   DateTime?         @map("locked_until") @db.Timestamptz(3)
+  /// The scanner's final answer (CLEAN or INFECTED) once DONE.
+  verdict       ScanStatus?
+  /// Which scanner implementation produced the verdict.
+  scanner       String?           @db.VarChar(40)
+  /// Safe diagnostic code only (never a message, URL or file content).
+  lastError     String?           @map("last_error") @db.VarChar(120)
+  createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  startedAt     DateTime?         @map("started_at") @db.Timestamptz(3)
+  completedAt   DateTime?         @map("completed_at") @db.Timestamptz(3)
+
+  @@index([status, nextAttemptAt])
+  @@map("file_scan_jobs")
+}
+
+enum NotificationChannel {
+  PUSH
+  SMS
+  EMAIL
+}
+
+enum DeliveryStatus {
+  /// Waiting for a delivery attempt (or a retry).
+  QUEUED
+  /// The provider ACCEPTED the message. Not proof that the device received it.
+  SENT
+  /// The provider reported delivery to the device (only for providers that can).
+  DELIVERED
+  FAILED
+  /// No provider is configured for this channel, so nothing was or will be attempted.
+  UNSUPPORTED
+}
+
+enum DevicePlatform {
+  ANDROID
+  IOS
+  HUAWEI
+}
+
+enum PushProviderName {
+  FCM
+  APNS
+  HMS
+}
+
+/// One in-app notification for one user. Content is NOT stored: only a template key and small safe
+/// parameters, rendered in the reader's language when read. (user_id, source_key) makes creation idempotent.
+model Notification {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  type         String    @db.VarChar(40)
+  /// What caused it, e.g. "booking-event:<id>". Unique per user so a replayed event creates nothing new.
+  sourceKey    String    @map("source_key") @db.VarChar(120)
+  /// Template parameters (e.g. the booking reference). Never prices, addresses, phones or names.
+  params       Json
+  resourceType String?   @map("resource_type") @db.VarChar(30)
+  resourceId   String?   @map("resource_id") @db.Uuid
+  readAt       DateTime? @map("read_at") @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user       User                   @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
+
+  @@unique([userId, sourceKey])
+  @@index([userId, createdAt(sort: Desc), id(sort: Desc)])
+  @@map("notifications")
+}
+
+/// One delivery attempt target of a notification on an external channel. (notification_id, target_key) is unique.
+model NotificationDelivery {
+  id                String              @id @default(uuid(7)) @db.Uuid
+  notificationId    String              @map("notification_id") @db.Uuid
+  channel           NotificationChannel
+  /// "push:<device token id>", "sms", "email".
+  targetKey         String              @map("target_key") @db.VarChar(60)
+  status            DeliveryStatus      @default(QUEUED)
+  attempts          Int                 @default(0)
+  nextAttemptAt     DateTime            @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  providerMessageId String?             @map("provider_message_id") @db.VarChar(200)
+  lastError         String?             @map("last_error") @db.VarChar(120)
+  sentAt            DateTime?           @map("sent_at") @db.Timestamptz(3)
+  deliveredAt       DateTime?           @map("delivered_at") @db.Timestamptz(3)
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, targetKey])
+  @@map("notification_deliveries")
+}
+
+/// A mobile push token. The token itself is stored encrypted; the hash is for lookup and uniqueness
+/// (one physical token belongs to one account at a time: signing in on the device moves it).
+model DeviceToken {
+  id              String           @id @default(uuid(7)) @db.Uuid
+  userId          String           @map("user_id") @db.Uuid
+  platform        DevicePlatform
+  provider        PushProviderName
+  tokenHash       String           @unique @map("token_hash") @db.Char(64)
+  tokenCiphertext String           @map("token_ciphertext") @db.Text
+  /// Which app registered it (the acting role of the session).
+  appRole         Role             @map("app_role")
+  /// The session (refresh_tokens.family_id) that registered it. Not a foreign key: a session is the family of rotated refresh tokens, not a row.
+  /// Ending the session revokes the registration. Null for registrations made before this column existed.
+  sessionId       String?          @map("session_id") @db.Uuid
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt      DateTime         @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  revokedAt       DateTime?        @map("revoked_at") @db.Timestamptz(3)
+
+  user User @relation("DeviceOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([sessionId])
+  @@map("device_tokens")
+}
+
+enum OfferAudience {
+  CUSTOMERS
+  WORKERS
+  ALL
+}
+
+enum OfferStatus {
+  DRAFT
+  PUBLISHED
+  PAUSED
+  ARCHIVED
+}
+
+/// An announcement/promotion managed by administrators. It carries NO discount, price or redemption
+/// data: financial redemption is deliberately not implemented (no approved policy).
+model Offer {
+  id            String        @id @default(uuid(7)) @db.Uuid
+  status        OfferStatus   @default(DRAFT)
+  audience      OfferAudience
+  titleAr       String?       @map("title_ar") @db.VarChar(150)
+  titleEn       String?       @map("title_en") @db.VarChar(150)
+  descriptionAr String?       @map("description_ar") @db.VarChar(1000)
+  descriptionEn String?       @map("description_en") @db.VarChar(1000)
+  termsAr       String?       @map("terms_ar") @db.VarChar(2000)
+  termsEn       String?       @map("terms_en") @db.VarChar(2000)
+  startsAt      DateTime      @map("starts_at") @db.Timestamptz(3)
+  endsAt        DateTime      @map("ends_at") @db.Timestamptz(3)
+  /// Optional eligibility: only for this city / service.
+  cityId        String?       @map("city_id") @db.Uuid
+  serviceId     String?       @map("service_id") @db.Uuid
+  publishedAt   DateTime?     @map("published_at") @db.Timestamptz(3)
+  createdById   String?       @map("created_by_id") @db.Uuid
+  updatedById   String?       @map("updated_by_id") @db.Uuid
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  city    City?        @relation(fields: [cityId], references: [id], onDelete: Restrict)
+  service Service?     @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  creator User?        @relation("OfferCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updater User?        @relation("OfferUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  events  OfferEvent[]
+
+  @@index([status, startsAt, endsAt])
+  @@index([cityId])
+  @@index([serviceId])
+  @@map("offers")
+}
+
+/// Append-only history of every change to an offer.
+model OfferEvent {
+  id          String       @id @default(uuid(7)) @db.Uuid
+  offerId     String       @map("offer_id") @db.Uuid
+  action      String       @db.VarChar(20)
+  fromStatus  OfferStatus? @map("from_status")
+  toStatus    OfferStatus? @map("to_status")
+  actorUserId String?      @map("actor_user_id") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  offer Offer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  actor User? @relation("OfferEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([offerId, createdAt])
+  @@map("offer_events")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Phase 9: disputes and reviews.
+// ---------------------------------------------------------------------------------------------
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  AWAITING_INFO
+  RESOLVED
+  CLOSED
+}
+
+enum DisputeCategory {
+  SERVICE_QUALITY
+  NO_SHOW
+  PRICING
+  PAYMENT
+  CONDUCT
+  OTHER
+}
+
+/// Whether someone asked for a money follow-up. It is only a flag for a SEPARATE approved workflow:
+/// nothing is refunded, reversed or compensated because of it.
+enum DisputeFinancialFollowup {
+  NONE
+  REQUESTED
+}
+
+enum DisputeVisibility {
+  PARTICIPANTS
+  INTERNAL
+}
+
+/// A complaint about one booking, raised by its customer or its assigned worker and handled by administrators.
+/// At most one dispute per booking may be active at a time (partial unique index in the migration).
+model Dispute {
+  id                String                   @id @default(uuid(7)) @db.Uuid
+  bookingId         String                   @map("booking_id") @db.Uuid
+  openedById        String                   @map("opened_by_id") @db.Uuid
+  /// CUSTOMER or WORKER (CHECK), decided by the server from the booking.
+  openedByRole      Role                     @map("opened_by_role")
+  category          DisputeCategory
+  description       String                   @db.VarChar(2000)
+  status            DisputeStatus            @default(OPEN)
+  assignedAdminId   String?                  @map("assigned_admin_id") @db.Uuid
+  /// What the participants are told when the dispute is resolved.
+  resolutionSummary String?                  @map("resolution_summary") @db.VarChar(2000)
+  financialFollowup DisputeFinancialFollowup @default(NONE) @map("financial_followup")
+  reopenCount       Int                      @default(0) @map("reopen_count")
+  resolvedAt        DateTime?                @map("resolved_at") @db.Timestamptz(3)
+  closedAt          DateTime?                @map("closed_at") @db.Timestamptz(3)
+  createdAt         DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  booking  Booking           @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  opener   User              @relation("DisputeOpener", fields: [openedById], references: [id], onDelete: Restrict)
+  handler  User?             @relation("DisputeHandler", fields: [assignedAdminId], references: [id], onDelete: SetNull)
+  events   DisputeEvent[]
+  evidence DisputeEvidence[]
+
+  @@index([bookingId])
+  @@index([status, createdAt])
+  @@index([openedById])
+  @@index([assignedAdminId, status])
+  @@map("disputes")
+}
+
+/// Append-only history and conversation of a dispute. INTERNAL entries are never shown to participants.
+model DisputeEvent {
+  id          String            @id @default(uuid(7)) @db.Uuid
+  disputeId   String            @map("dispute_id") @db.Uuid
+  action      String            @db.VarChar(24)
+  fromStatus  DisputeStatus?    @map("from_status")
+  toStatus    DisputeStatus?    @map("to_status")
+  actorUserId String?           @map("actor_user_id") @db.Uuid
+  actorRole   Role?             @map("actor_role")
+  visibility  DisputeVisibility @default(PARTICIPANTS)
+  note        String?           @db.VarChar(2000)
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  dispute Dispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  actor   User?   @relation("DisputeEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([disputeId, createdAt])
+  @@map("dispute_events")
+}
+
+/// A reference to an EXISTING private booking photo or chat message of the same booking. Files are never copied.
+model DisputeEvidence {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  disputeId      String   @map("dispute_id") @db.Uuid
+  bookingPhotoId String?  @map("booking_photo_id") @db.Uuid
+  chatMessageId  String?  @map("chat_message_id") @db.Uuid
+  addedById      String   @map("added_by_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  dispute Dispute       @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  photo   BookingPhoto? @relation(fields: [bookingPhotoId], references: [id], onDelete: Restrict)
+  message ChatMessage?  @relation(fields: [chatMessageId], references: [id], onDelete: Restrict)
+  addedBy User          @relation("EvidenceAdder", fields: [addedById], references: [id], onDelete: Restrict)
+
+  @@unique([disputeId, bookingPhotoId])
+  @@unique([disputeId, chatMessageId])
+  @@index([bookingPhotoId])
+  @@index([chatMessageId])
+  @@map("dispute_evidence")
+}
+
+enum ReviewStatus {
+  PUBLISHED
+  /// Hidden by an administrator (reversible).
+  HIDDEN
+  /// Withdrawn by the customer (final).
+  WITHDRAWN
+}
+
+/// A customer's rating of the worker of one COMPLETED booking. rating, comment and the people are immutable
+/// (trigger); only the status moves. One review per booking (unique).
+model Review {
+  id              String       @id @default(uuid(7)) @db.Uuid
+  bookingId       String       @unique @map("booking_id") @db.Uuid
+  customerId      String       @map("customer_id") @db.Uuid
+  workerProfileId String       @map("worker_profile_id") @db.Uuid
+  rating          Int
+  comment         String?      @db.VarChar(1000)
+  status          ReviewStatus @default(PUBLISHED)
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  booking  Booking       @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  customer User          @relation("ReviewAuthor", fields: [customerId], references: [id], onDelete: Restrict)
+  worker   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Restrict)
+  events   ReviewEvent[]
+
+  @@index([workerProfileId, status, createdAt])
+  @@index([status, createdAt])
+  @@index([customerId])
+  @@map("reviews")
+}
+
+/// Append-only moderation and lifecycle history of a review.
+model ReviewEvent {
+  id          String        @id @default(uuid(7)) @db.Uuid
+  reviewId    String        @map("review_id") @db.Uuid
+  action      String        @db.VarChar(16)
+  fromStatus  ReviewStatus? @map("from_status")
+  toStatus    ReviewStatus  @map("to_status")
+  actorUserId String?       @map("actor_user_id") @db.Uuid
+  actorRole   Role          @map("actor_role")
+  reason      String?       @db.VarChar(500)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  actor  User?  @relation("ReviewEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([reviewId, createdAt])
+  @@map("review_events")
+}
+
+// ===========================================================================
+// Support: one conversation per customer / worker with the administrators
+// ===========================================================================
+
+enum SupportThreadStatus {
+  OPEN // the person wrote last (or reopened): waiting for an administrator
+  ANSWERED // an administrator wrote last
+  RESOLVED // closed by an administrator; a new message from the person reopens it
+}
+
+/// One support conversation per user (customers and workers, including a worker whose application is not approved).
+model SupportThread {
+  id             String              @id @default(uuid(7)) @db.Uuid
+  userId         String              @unique @map("user_id") @db.Uuid
+  status         SupportThreadStatus @default(OPEN)
+  /// Role of whoever wrote last (the person's own role, or ADMIN).
+  lastSenderRole Role                @map("last_sender_role")
+  lastMessageAt  DateTime            @default(now()) @map("last_message_at") @db.Timestamptz(3)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  messages SupportMessage[]
+
+  @@index([status, lastMessageAt])
+  @@map("support_threads")
+}
+
+/// A message in a support conversation. `seq` is per thread, so history order and "messages after N" recovery are stable;
+/// (thread, sender, clientMessageId) makes a retried send return the original message instead of creating a second one.
+model SupportMessage {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  threadId        String   @map("thread_id") @db.Uuid
+  seq             Int
+  senderUserId    String   @map("sender_user_id") @db.Uuid
+  /// The sender's role (CUSTOMER, WORKER or ADMIN); taken from the sign-in, never from the client.
+  senderRole      Role     @map("sender_role")
+  clientMessageId String   @map("client_message_id") @db.VarChar(64)
+  /// Plain text, 1..2000 characters (CHECK constraint).
+  body            String   @db.VarChar(2000)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  thread SupportThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender User          @relation("SupportSender", fields: [senderUserId], references: [id], onDelete: Restrict)
+
+  @@unique([threadId, seq])
+  @@unique([threadId, senderUserId, clientMessageId])
+  @@index([senderUserId])
+  @@map("support_messages")
+}

@@ -1,0 +1,72 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/settings.json
+
+# --- Secrets: never commit. Only *.example files with placeholders are tracked. ---
+.env
+.env.*
+!.env.example
+*.env
+.envrc
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+key.properties
+# Google Maps keys (local only; the *.example files are tracked)
+**/maps.local.json
+**/Secrets.xcconfig
+**/android/key.properties
+**/android/local.properties
+google-services.json
+GoogleService-Info.plist
+firebase-adminsdk*.json
+*serviceAccount*.json
+service-account*.json
+credentials.json
+secrets/
+.secrets/
+
+# --- Dependencies and build output (all regenerable) ---
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.tsbuildinfo
+*.log
+npm-debug.log*
+
+# Generated Prisma client (created by `prisma generate`)
+apps/backend/src/generated/
+
+# Built Android packages (rebuild with `flutter build apk`)
+release/*.apk
+release/*.aab
+
+# Local scratch
+tmp/
+*.local
+
+# Local file storage used by DOCUMENT_STORAGE=local (development/test only)
+.storage/
+.storage-test/
+apps/backend/.storage/
+apps/backend/.storage-test/
+
+# Firebase Admin SDK private keys
+*firebase-adminsdk*.json
+
+# Local database diagnostic script
+.tmp-db.mjs
+**/tmp-db.mjs
