@@ -80,12 +80,12 @@ export function Header() {
 
   return (
     <header className="flex h-[72px] shrink-0 items-center gap-4 border-b border-line bg-white px-7">
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <div className="flex shrink-0 flex-col gap-0.5 whitespace-nowrap">
         <div className="text-xs text-slate">Admin · {meta.group}</div>
         <div className="text-xl font-bold">{meta.title}</div>
       </div>
 
-      <div className="relative w-[300px] shrink-0">
+      <div className="relative min-w-[160px] max-w-[300px] flex-1">
         <div className={`flex h-10 items-center gap-2 rounded-xl border-[1.5px] pl-3 pr-2 text-slate ${focused ? "border-brand bg-white" : "border-transparent bg-faint"}`}>
           <Icon name="search" size={16} />
           <input
@@ -132,7 +132,7 @@ export function Header() {
         )}
       </div>
 
-      <div className="flex gap-0.5 rounded-xl bg-soft p-[3px]">
+      <div className="flex shrink-0 gap-0.5 whitespace-nowrap rounded-xl bg-soft p-[3px]">
         {cityTabs.map((c) => (
           <button key={c.value} type="button" onClick={() => setCity(c.value)} className={`h-[34px] rounded-[9px] px-3 text-[13px] font-semibold ${city === c.value ? "bg-white text-ink shadow-[0_1px_3px_rgba(23,43,53,.12)]" : "text-slate"}`}>
             {c.label}
@@ -146,11 +146,8 @@ export function Header() {
         <Icon name="bell" size={18} />
       </button>
       <div className="flex items-center gap-2.5">
-        <div className="flex flex-col text-end leading-tight">
-          <span className="text-[13px] font-semibold">{me?.fullName ?? me?.email ?? "Administrator"}</span>
-          {me?.fullName && me.email && <span className="text-[11.5px] text-slate">{me.email}</span>}
-        </div>
-        <button type="button" onClick={signOut} className="h-10 rounded-xl border border-line bg-white px-3 text-[13px] font-semibold">
+        <span className="whitespace-nowrap text-[13px] font-semibold">{me?.fullName ?? "Administrator"}</span>
+        <button type="button" onClick={signOut} className="h-10 shrink-0 rounded-xl border border-line bg-white px-3 text-[13px] font-semibold">
           Sign out
         </button>
       </div>
