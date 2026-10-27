@@ -20,7 +20,7 @@ const TONE: Record<VerificationStatus, Tone> = {
 const DOC_TONE: Record<AdminDocument["status"], Tone> = { PENDING_UPLOAD: "neutral", UPLOADED: "warn", ACCEPTED: "ok", REJECTED: "bad" };
 const fmtDate = (iso: string | null) => (iso ? new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "—");
 
-type Dialog = { kind: "reject" | "request-info" } | { kind: "doc-reject"; doc: AdminDocument } | null;
+type Dialog = { kind: "reject" | "request-info" | "suspend" } | { kind: "doc-reject"; doc: AdminDocument } | null;
 
 function useTotal(status: string) {
   return useQuery<Paged<WorkerListItem>>(`workers?status=${status}&limit=1`);
@@ -65,18 +65,17 @@ export default function VerificationPage() {
     rejectedCount.reload();
   }
 
-  async function decide(action: "start-review" | "approve" | "reject" | "request-info", reason?: string) {
+  async function decide(action: "start-review" | "approve" | "reject" | "request-info" | "suspend" | "reinstate", reason?: string) {
     if (!currentId) return;
     await api.post(`workers/${currentId}/${action}`, reason ? { reason } : {});
-    const label = { "start-review": "Review started", approve: "Worker approved", reject: "Application rejected", "request-info": "More information requested" }[action];
+    const label = { "start-review": "Review started", approve: "Worker approved", reject: "Application rejected", "request-info": "More information requested", suspend: "Worker suspended", reinstate: "Worker reinstated" }[action];
     showToast(label);
-    // After a decision the worker leaves the queue: move to the next applicant.
-    const next = items.find((i) => i.id !== currentId);
-    if (action !== "start-review") setSelected(next?.id ?? null);
+    // The application stays open after a decision, so the reviewer sees its new status; it leaves the queue list on its own.
+    setSelected(currentId);
     refreshAll();
   }
 
-  async function run(action: "start-review" | "approve") {
+  async function run(action: "start-review" | "approve" | "reinstate") {
     setBusy(true);
     setError(null);
     try {
@@ -107,7 +106,6 @@ export default function VerificationPage() {
   }
 
   const total = (q: { data: Paged<WorkerListItem> | null }) => (q.data ? String(q.data.meta.total) : "…");
-  const pending = w?.verificationStatus === "SUBMITTED" || w?.verificationStatus === "UNDER_REVIEW";
 
   return (
     <>
@@ -197,21 +195,94 @@ export default function VerificationPage() {
                 )}
               </div>
               {error && <div role="alert" className="mx-5 mb-3 rounded-xl border border-danger-line bg-danger-bg px-3 py-2.5 text-[13px] text-danger">{error}</div>}
-              <div className="flex gap-2.5 border-t border-soft px-5 py-4">
-                {w.verificationStatus === "SUBMITTED" && <button type="button" disabled={busy} onClick={() => run("start-review")} className="h-11 rounded-xl border-[1.5px] border-line bg-white px-[18px] font-semibold disabled:opacity-50">Start review</button>}
-                <button type="button" disabled={busy || !pending} onClick={() => run("approve")} className="flex h-11 items-center gap-2 rounded-xl bg-brand px-5 font-semibold text-white disabled:opacity-40"><Icon name="check" size={16} strokeWidth={2.6} />Approve worker</button>
-                <button type="button" disabled={busy || !pending} onClick={() => setDialog({ kind: "request-info" })} className="h-11 rounded-xl bg-cream px-[18px] font-semibold text-[#8a5b00] disabled:opacity-40">Request more info</button>
-                <div className="flex-1" />
-                <button type="button" disabled={busy || !pending} onClick={() => setDialog({ kind: "reject" })} className="h-11 rounded-xl border-[1.5px] border-danger-line bg-white px-[18px] font-semibold text-danger disabled:opacity-40">Reject</button>
-              </div>
+              <StatusFooter
+                status={w.verificationStatus}
+                note={w.verificationNote}
+                when={{ submitted: w.submittedAt, verified: w.verifiedAt }}
+                busy={busy}
+                onStart={() => run("start-review")}
+                onApprove={() => run("approve")}
+                onRequestInfo={() => setDialog({ kind: "request-info" })}
+                onReject={() => setDialog({ kind: "reject" })}
+                onSuspend={() => setDialog({ kind: "suspend" })}
+                onReinstate={() => run("reinstate")}
+              />
             </>
           )}
         </Card>
       </div>
 
       {dialog?.kind === "reject" && <ReasonDialog title="Reject application" subtitle="The worker sees this reason and can fix the application and apply again." cta="Reject" required onClose={() => setDialog(null)} onConfirm={async (r) => { try { await decide("reject", r); } catch (e) { throw new Error(describeError(e)); } }} />}
+      {dialog?.kind === "suspend" && <ReasonDialog title="Suspend worker" subtitle="The worker is blocked from taking jobs and sees this reason." cta="Suspend" required onClose={() => setDialog(null)} onConfirm={async (r) => { try { await decide("suspend", r); } catch (e) { throw new Error(describeError(e)); } }} />}
       {dialog?.kind === "request-info" && <ReasonDialog title="Request more information" subtitle="Tell the worker exactly what to fix or add." cta="Send request" required onClose={() => setDialog(null)} onConfirm={async (r) => { try { await decide("request-info", r); } catch (e) { throw new Error(describeError(e)); } }} />}
       {dialog?.kind === "doc-reject" && <ReasonDialog title={`Reject ${DOCUMENT_LABEL[dialog.doc.type] ?? "document"}`} subtitle="Say what is wrong with this document." cta="Reject document" required onClose={() => setDialog(null)} onConfirm={async (r) => { try { await reviewDocument(dialog.doc, "REJECTED", r); } catch (e) { throw new Error(describeError(e)); } }} />}
     </>
   );
+}
+
+/** What the reviewer can do with an application depends on where it is: the bar under the application changes with its status. */
+function StatusFooter({
+  status, note, when, busy, onStart, onApprove, onRequestInfo, onReject, onSuspend, onReinstate,
+}: {
+  status: VerificationStatus;
+  note: string | null;
+  when: { submitted: string | null; verified: string | null };
+  busy: boolean;
+  onStart: () => void;
+  onApprove: () => void;
+  onRequestInfo: () => void;
+  onReject: () => void;
+  onSuspend: () => void;
+  onReinstate: () => void;
+}) {
+  const approve = (
+    <button type="button" disabled={busy} onClick={onApprove} className="flex h-11 items-center gap-2 rounded-xl bg-brand px-5 font-semibold text-white disabled:opacity-40"><Icon name="check" size={16} strokeWidth={2.6} />Approve worker</button>
+  );
+  const info = <button type="button" disabled={busy} onClick={onRequestInfo} className="h-11 rounded-xl bg-cream px-[18px] font-semibold text-[#8a5b00] disabled:opacity-40">Request more info</button>;
+  const reject = <button type="button" disabled={busy} onClick={onReject} className="h-11 rounded-xl border-[1.5px] border-danger-line bg-white px-[18px] font-semibold text-danger disabled:opacity-40">Reject</button>;
+  const banner = (tone: "ok" | "warn" | "bad" | "neutral", text: string) => (
+    <div role="status" className={`mx-5 mb-0 mt-1 rounded-xl px-3.5 py-2.5 text-[13px] ${tone === "ok" ? "bg-tint text-brand" : tone === "warn" ? "bg-cream text-[#8a5b00]" : tone === "bad" ? "bg-danger-bg text-danger" : "bg-background text-slate"}`}>{text}</div>
+  );
+  const date = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-GB") : "");
+  const bar = (children: React.ReactNode) => <div className="flex gap-2.5 border-t border-soft px-5 py-4">{children}</div>;
+
+  switch (status) {
+    case "SUBMITTED":
+      return (
+        <>
+          {banner("neutral", `Submitted ${date(when.submitted)}. Start the review to decide on it, or decide straight away.`)}
+          {bar(<>
+            <button type="button" disabled={busy} onClick={onStart} className="h-11 rounded-xl border-[1.5px] border-line bg-white px-[18px] font-semibold disabled:opacity-50">Start review</button>
+            {approve}{info}<div className="flex-1" />{reject}
+          </>)}
+        </>
+      );
+    case "UNDER_REVIEW":
+      return (
+        <>
+          {banner("warn", "Under review. Check the documents, then approve, ask for more information or reject.")}
+          {bar(<>{approve}{info}<div className="flex-1" />{reject}</>)}
+        </>
+      );
+    case "INFO_REQUIRED":
+      return banner("warn", `Waiting for the worker to send more information${note ? `: “${note}”` : "."} The application comes back to the queue when they resubmit.`);
+    case "APPROVED":
+      return (
+        <>
+          {banner("ok", `Approved${when.verified ? ` on ${date(when.verified)}` : ""}. The worker can take jobs.`)}
+          {bar(<><div className="flex-1" /><button type="button" disabled={busy} onClick={onSuspend} className="h-11 rounded-xl border-[1.5px] border-danger-line bg-white px-[18px] font-semibold text-danger disabled:opacity-40">Suspend worker</button></>)}
+        </>
+      );
+    case "REJECTED":
+      return banner("bad", `Rejected${note ? `: “${note}”` : "."} The worker can fix the application and apply again.`);
+    case "SUSPENDED":
+      return (
+        <>
+          {banner("bad", `Suspended${note ? `: “${note}”` : "."} The worker cannot take jobs.`)}
+          {bar(<><div className="flex-1" /><button type="button" disabled={busy} onClick={onReinstate} className="h-11 rounded-xl bg-brand px-5 font-semibold text-white disabled:opacity-40">Reinstate worker</button></>)}
+        </>
+      );
+    default:
+      return banner("neutral", "The worker has not submitted this application yet.");
+  }
 }

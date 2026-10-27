@@ -204,6 +204,12 @@ class ServicesStep extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _Label(context.l(Ob.services)),
+          if (!catalog.categories.any((c) => c.services.isNotEmpty))
+            _EmptyOptions(
+              key: const Key('no-services'),
+              text: context.l(Ob.noServicesYet),
+              onRetry: () => context.onboarding.reloadCatalog(),
+            ),
           for (final category in catalog.categories)
             if (category.services.isNotEmpty) ...[
               const SizedBox(height: 14),
@@ -228,6 +234,12 @@ class ServicesStep extends StatelessWidget {
             ],
           _Label(context.l(Ob.cities), top: 22),
           const SizedBox(height: 14),
+          if (catalog.cities.isEmpty)
+            _EmptyOptions(
+              key: const Key('no-cities'),
+              text: context.l(Ob.noCitiesYet),
+              onRetry: () => context.onboarding.reloadCatalog(),
+            ),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -240,6 +252,34 @@ class ServicesStep extends StatelessWidget {
                   onTap: () => draft.toggleCity(c.id),
                 ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// What a list of choices says when the server has none yet, with a way to ask again.
+class _EmptyOptions extends StatelessWidget {
+  const _EmptyOptions({super.key, required this.text, required this.onRetry});
+  final String text;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(text, style: ts(13.5, c: AppColors.slate, h: 1.45)),
+          ),
+          Tap(
+            onTap: onRetry,
+            child: Text(
+              context.l(Ob.retry),
+              style: ts(13.5, w: 600, c: AppColors.primary),
+            ),
           ),
         ],
       ),

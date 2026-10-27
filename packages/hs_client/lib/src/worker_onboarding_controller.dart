@@ -126,10 +126,19 @@ class WorkerOnboardingController extends ChangeNotifier {
     }
   }
 
-  /// Service categories and cities for the forms (public data, cached once loaded).
+  /// Service categories and cities for the forms (public data, cached once loaded). A catalog with nothing in it is asked for again, so
+  /// choices added since (the administrators' catalog) show up without restarting the app.
   Future<bool> loadCatalog() {
-    if (_catalog != null) return Future.value(true);
+    final c = _catalog;
+    if (c != null && c.categories.any((x) => x.services.isNotEmpty) && c.cities.isNotEmpty) return Future.value(true);
     return _catalogLoading ??= _loadCatalog().whenComplete(() => _catalogLoading = null);
+  }
+
+  /// Asks the server for the catalog again, whatever was loaded before.
+  Future<bool> reloadCatalog() {
+    _catalog = null;
+    notifyListeners();
+    return loadCatalog();
   }
 
   Future<bool> _loadCatalog() async {

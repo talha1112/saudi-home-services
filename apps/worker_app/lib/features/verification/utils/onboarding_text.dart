@@ -33,6 +33,14 @@ abstract final class Ob {
   static const cities = Bi('Which cities do you work in?', 'في أي المدن تعمل؟');
   static const loadingCatalog = Bi('Loading services…', 'جارٍ تحميل الخدمات…');
   static const retry = Bi('Try again', 'حاول مجدداً');
+  static const noServicesYet = Bi(
+    'No services are available yet. Please try again later.',
+    'لا توجد خدمات متاحة بعد. يرجى المحاولة لاحقاً.',
+  );
+  static const noCitiesYet = Bi(
+    'No cities are available yet. Please try again later.',
+    'لا توجد مدن متاحة بعد. يرجى المحاولة لاحقاً.',
+  );
 
   static const days = Bi('Working days', 'أيام العمل');
   static const hours = Bi('Working hours', 'ساعات العمل');
