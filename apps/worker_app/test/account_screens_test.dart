@@ -7,6 +7,7 @@ import 'package:worker_app/app/jobs_scope.dart';
 import 'package:worker_app/core/config/demo_data.dart';
 import 'package:worker_app/features/earnings/screens/earnings_screen.dart';
 import 'package:worker_app/features/earnings/widgets/real_earnings.dart';
+import 'package:worker_app/features/dashboard/widgets/real_home.dart';
 import 'package:worker_app/features/messages/screens/chat_screen.dart';
 import 'package:worker_app/features/notifications/screens/notifications_screen.dart';
 import 'package:worker_app/features/profile/screens/profile_screen.dart';
@@ -154,6 +155,7 @@ void main() {
           sharer: base.sharer,
           notifications: base.notifications,
           reviews: base.reviews,
+          presence: base.presence,
           openFromNotification: (e) async => opened.add(e),
         );
         addTearDown(() {
@@ -205,6 +207,7 @@ void main() {
           sharer: base.sharer,
           notifications: base.notifications,
           reviews: base.reviews,
+          presence: base.presence,
           openFromNotification: (e) async => opened.add(e),
         );
         addTearDown(() {
@@ -693,6 +696,77 @@ void main() {
       );
       expect(tester.takeException(), isNull);
       expect(find.text('الأرباح'), findsOneWidget);
+    });
+  });
+
+  group('the home tab header', () {
+    testWidgets('has a bell with a red dot only while something is unread', (
+      tester,
+    ) async {
+      final (kit, services) = await _open(
+        tester,
+        RealHome(active: true),
+        arrange: (api) => api.notificationList.add(_n('a')),
+        status: 'APPROVED',
+      );
+      expect(find.byKey(const Key('home-bell')), findsOneWidget);
+      expect(find.byKey(const Key('bell-unread')), findsOneWidget);
+
+      await services.notifications.markRead(kit.api.notificationList.first);
+      await _settle(tester);
+      expect(find.byKey(const Key('bell-unread')), findsNothing);
+      expect(find.byKey(const Key('home-bell')), findsOneWidget);
+    });
+
+    testWidgets('asks for the worker\'s photo', (tester) async {
+      final (kit, _) = await _open(
+        tester,
+        RealHome(active: true),
+        status: 'APPROVED',
+      );
+      expect(kit.api.calls, contains('workerPhotoUrl'));
+    });
+
+    testWidgets('the online switch shows the cities and goes to the server', (
+      tester,
+    ) async {
+      final (kit, _) = await _open(
+        tester,
+        RealHome(active: true),
+        status: 'APPROVED',
+        arrange: (api) {
+          api.workerCities.addAll(['c1', 'c2']);
+          api.cityNames.addAll({'c1': 'Riyadh', 'c2': 'Jeddah'});
+        },
+      );
+      expect(find.text('You’re online'), findsOneWidget);
+      expect(find.text('Receiving requests in Riyadh, Jeddah'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('online-switch')));
+      await _settle(tester);
+      expect(kit.api.workerOnline, isFalse);
+      expect(find.text('You’re offline'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('online-switch')));
+      await _settle(tester);
+      expect(kit.api.workerOnline, isTrue);
+      expect(find.text('You’re online'), findsOneWidget);
+    });
+
+    testWidgets('a refused switch goes back and says so', (tester) async {
+      final (kit, _) = await _open(
+        tester,
+        Scaffold(body: RealHome(active: true)),
+        status: 'APPROVED',
+      );
+      kit.api.onlineResult = const ApiException(status: 403, code: 'X');
+      await tester.tap(find.byKey(const Key('online-switch')));
+      await _settle(tester);
+      expect(find.text('You’re online'), findsOneWidget);
+      expect(
+        find.text('Could not change your status. Please try again.'),
+        findsOneWidget,
+      );
     });
   });
 }

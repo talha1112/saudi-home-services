@@ -51,6 +51,7 @@ Future<void> _render(
   final services = makeJobsServices(kit);
   addTearDown(services.jobs.dispose);
   addTearDown(services.quotes.dispose);
+  await kit.client.auth.restore(); // as main() does before the app starts
   await tester.pumpWidget(
     workerHarness(
       kit: kit,
@@ -178,6 +179,7 @@ void main() {
     addTearDown(tester.view.resetViewInsets);
     final kit = TestHsClient();
     addTearDown(kit.client.auth.dispose);
+    await kit.client.auth.restore(); // as main() does before the app starts
     await tester.pumpWidget(App(client: kit.client));
     await tester.pump(const Duration(milliseconds: 600));
     await tester.tapAt(const Offset(10, 10)); // dismiss the language dialog
@@ -201,6 +203,7 @@ void main() {
     addTearDown(tester.view.reset);
     final kit = TestHsClient();
     addTearDown(kit.client.auth.dispose);
+    await kit.client.auth.restore(); // as main() does before the app starts
     await tester.pumpWidget(App(client: kit.client));
     await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('Choose your preferred language'), findsOneWidget);

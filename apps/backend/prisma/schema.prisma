@@ -200,8 +200,8 @@ model WorkerProfile {
   /// Message shown to the applicant on INFO_REQUIRED / REJECTED.
   verificationNote        String?                  @map("verification_note") @db.VarChar(1000)
 
-  /// Worker is currently accepting requests.
-  isOnline          Boolean @default(false) @map("is_online")
+  /// Worker is currently accepting requests: switched by the worker; offline workers are shown no new requests.
+  isOnline          Boolean @default(true) @map("is_online")
   acceptsUrgentJobs Boolean @default(true) @map("accepts_urgent_jobs")
 
   /// Cached from PUBLISHED reviews only (recomputed from the reviews table under a lock, never incremented).

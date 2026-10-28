@@ -101,7 +101,7 @@ abstract final class AppRouter {
     );
   }
 
-  static void toNotifications(BuildContext context) =>
+  static Future<void> toNotifications(BuildContext context) =>
       _push(context, const NotificationsScreen(), '/notifications');
 
   /// An open request from the backend (the area only; the street address is never part of it).

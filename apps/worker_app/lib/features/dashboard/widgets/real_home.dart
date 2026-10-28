@@ -11,10 +11,12 @@ import '../../../shared/components/cards.dart';
 import '../../../shared/widgets/app_button.dart';
 import '../../../shared/widgets/tap.dart';
 import '../../../shared/widgets/tiles.dart';
+import '../../../shared/widgets/worker_avatar.dart';
 import '../../jobs/logic/worker_jobs_controller.dart';
+import 'home_widgets.dart';
 
-/// The worker's home tab from real data: new requests to quote on and the jobs that are next. No earnings, ratings, online switch or
-/// notification count: the backend has none of those yet, so none is shown.
+/// The worker's home tab from real data: the online switch, the notification bell, new requests to quote on and the jobs that are next. No
+/// earnings: those have their own tabs.
 class RealHome extends StatefulWidget {
   const RealHome({super.key, required this.active});
 
@@ -48,7 +50,9 @@ class _RealHomeState extends State<RealHome> {
     final jobs = _jobs;
     if (jobs == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) jobs.refresh();
+      if (!mounted) return;
+      jobs.refresh();
+      JobsScope.of(context).presence.load();
     });
   }
 
@@ -83,13 +87,10 @@ class _RealHomeState extends State<RealHome> {
                 padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
                 child: Row(
                   children: [
-                    InitialsTile(
-                      name.isEmpty
+                    WorkerAvatar(
+                      initials: name.isEmpty
                           ? '•'
                           : String.fromCharCode(name.runes.first).toUpperCase(),
-                      size: 48,
-                      fontSize: 16,
-                      radius: 16,
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -108,8 +109,39 @@ class _RealHomeState extends State<RealHome> {
                         ],
                       ),
                     ),
+                    _Bell(notifications: JobsScope.of(context).notifications),
                   ],
                 ),
+              ),
+              ListenableBuilder(
+                listenable: JobsScope.of(context).presence,
+                builder: (context, _) {
+                  final presence = JobsScope.of(context).presence;
+                  if (!presence.loaded) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                    child: OnlineToggleCard(
+                      key: const Key('online-switch'),
+                      online: presence.online,
+                      areas: presence.cities
+                          .map((c) => c.name(arabic: ar))
+                          .join(ar ? '، ' : ', '),
+                      onTap: () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        final problem = context.tr('onlineFailed');
+                        await presence.setOnline(!presence.online);
+                        if (presence.error != null) {
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text(problem),
+                            ),
+                          );
+                        }
+                        await jobs.refresh(); // the feed follows the switch
+                      },
+                    ),
+                  );
+                },
               ),
               if (failed)
                 Padding(
@@ -245,6 +277,76 @@ String _area(BookingLocation l, bool ar) {
     if (l.district != null && l.district!.isNotEmpty) l.district!,
     city,
   ].where((p) => p.isNotEmpty).join(' · ');
+}
+
+/// The notification bell. The red dot is there only while the server counts unread notifications.
+class _Bell extends StatefulWidget {
+  const _Bell({required this.notifications});
+
+  final NotificationsController notifications;
+
+  @override
+  State<_Bell> createState() => _BellState();
+}
+
+class _BellState extends State<_Bell> {
+  @override
+  void initState() {
+    super.initState();
+    _count();
+  }
+
+  @override
+  void didUpdateWidget(_Bell old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.notifications, widget.notifications)) _count();
+  }
+
+  void _count() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && context.authRead.isSignedIn) {
+        widget.notifications.refreshUnread();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.notifications,
+      builder: (context, _) => Stack(
+        clipBehavior: Clip.none,
+        children: [
+          SquareIconButton(
+            key: const Key('home-bell'),
+            icon: 'bell',
+            size: 46,
+            radius: 15,
+            iconSize: 21,
+            onTap: () async {
+              await AppRouter.toNotifications(context);
+              if (mounted) widget.notifications.refreshUnread();
+            },
+          ),
+          if (widget.notifications.unread > 0)
+            PositionedDirectional(
+              key: const Key('bell-unread'),
+              top: 10,
+              end: 11,
+              child: Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: AppColors.danger,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _RequestRow extends StatelessWidget {

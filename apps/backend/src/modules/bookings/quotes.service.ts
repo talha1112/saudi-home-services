@@ -4,6 +4,7 @@ import { badRequest, badRequestWith } from '../../common/errors/api-error.js';
 import { APP_CONFIG, type AppConfig, type BookingsConfig } from '../../config/app.config.js';
 import { PrismaService } from '../../database/prisma.service.js';
 import { BookingEventType, BookingStatus, QuoteStatus, Role } from '../../generated/prisma/client.js';
+import type { AvailabilityRow } from '../workers/availability.js';
 import { PricingService } from '../pricing/pricing.service.js';
 import { computeQuoteAmounts } from '../pricing/money.js';
 import { conflict, isUniqueViolation, isLive, lockBooking, notFound, recordEvent } from './booking-support.js';
@@ -15,6 +16,10 @@ export interface WorkerContext {
   id: string;
   serviceIds: Map<string, number | null>;
   cityIds: Set<string>;
+  /** Switched by the worker in the app; an offline worker is shown no new requests. */
+  isOnline: boolean;
+  /** The weekly hours the worker set. Empty = no hours set (never hides requests). */
+  hours: AvailabilityRow[];
 }
 
 /** Quote submission, editing and withdrawal by workers. Prices are always computed here. */
@@ -34,13 +39,15 @@ export class QuotesService {
   async workerContext(userId: string): Promise<WorkerContext> {
     const profile = await this.prisma.workerProfile.findUnique({
       where: { userId },
-      select: { id: true, services: { select: { serviceId: true, yearsOfExperience: true } }, serviceAreas: { select: { cityId: true } } },
+      select: { id: true, isOnline: true, services: { select: { serviceId: true, yearsOfExperience: true } }, serviceAreas: { select: { cityId: true } }, availability: { select: { dayOfWeek: true, startMinute: true, endMinute: true } } },
     });
     if (!profile) throw notFound('Worker profile');
     return {
       id: profile.id,
       serviceIds: new Map(profile.services.map((s) => [s.serviceId, s.yearsOfExperience])),
       cityIds: new Set(profile.serviceAreas.map((a) => a.cityId)),
+      isOnline: profile.isOnline,
+      hours: profile.availability,
     };
   }
 

@@ -14,6 +14,7 @@ import '../../../shared/components/language_dialog.dart';
 import '../../../shared/widgets/app_icon.dart';
 import '../../../shared/widgets/tap.dart';
 import '../../../shared/widgets/tiles.dart';
+import '../../../shared/widgets/worker_avatar.dart';
 import '../../verification/utils/onboarding_text.dart';
 
 String _initials(String name) {
@@ -229,8 +230,8 @@ class _RealProfileState extends State<RealProfile> {
                   Stack(
                     clipBehavior: Clip.none,
                     children: [
-                      InitialsTile(
-                        _initials(name),
+                      WorkerAvatar(
+                        initials: _initials(name),
                         size: 68,
                         fontSize: 22,
                         radius: 22,

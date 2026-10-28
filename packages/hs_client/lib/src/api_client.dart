@@ -412,6 +412,23 @@ class HsApi {
 
   // ------------------------------------------------------------------ my account
 
+  /// Takes the signed-in worker online or offline; answers whether they are online now. Offline: no new requests, no new-request pushes.
+  Future<bool> setWorkerOnline(String accessToken, bool online) async {
+    final r = await _json('PUT', '/workers/me/online', accessToken: accessToken, body: {'isOnline': online});
+    return r['isOnline'] as bool? ?? online;
+  }
+
+  /// Tells the server which language the person uses, so their notifications are written in it. [locale] is 'EN' or 'AR'.
+  Future<void> setLocale(String accessToken, String locale) async {
+    await _json('PATCH', '/account/locale', accessToken: accessToken, body: {'locale': locale});
+  }
+
+  /// A short-lived link to the signed-in worker's profile photo; null while there is none.
+  Future<String?> workerPhotoUrl(String accessToken) async {
+    final r = await _json('GET', '/workers/me/photo', accessToken: accessToken);
+    return r['url'] as String?;
+  }
+
   /// Sets the signed-in customer's name; answers the saved name.
   Future<String?> updateCustomerName(String accessToken, String fullName) async {
     final r = await _json('PATCH', '/customers/me', accessToken: accessToken, body: {'fullName': fullName});

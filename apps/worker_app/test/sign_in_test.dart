@@ -21,6 +21,7 @@ Future<TestHsClient> _pump(WidgetTester tester, {String? status}) async {
     user: fakeUser(role: 'WORKER', workerStatus: status),
   );
   addTearDown(kit.client.auth.dispose);
+  await kit.client.auth.restore(); // as main() does before the app starts
   await tester.pumpWidget(App(client: kit.client));
   await tester.pump(const Duration(milliseconds: 600));
   await tester.tapAt(const Offset(10, 10)); // dismiss the language dialog

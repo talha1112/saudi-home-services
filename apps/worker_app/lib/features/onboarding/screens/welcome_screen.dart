@@ -132,6 +132,18 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // A saved session is still being checked: say so instead of flashing the phone form, which then jumps away.
+    final auth = _auth;
+    if (auth == null) return _form(context);
+    return ListenableBuilder(
+      listenable: auth,
+      builder: (context, _) => auth.status == AuthStatus.unknown
+          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+          : _form(context),
+    );
+  }
+
+  Widget _form(BuildContext context) {
     final ar = context.isAr;
     final ok = isValidSaudiPhone(context.appRead.phone);
     final top = MediaQuery.paddingOf(context).top;

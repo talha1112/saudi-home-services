@@ -125,6 +125,10 @@ const Map<String, Bi> kStrings = {
   'contactSupport': Bi('Contact support', 'تواصل مع الدعم'),
   'demoStates': Bi('Demo: verification states', 'تجربة: حالات التحقق'),
   'hello': Bi('Good evening', 'مساء الخير'),
+  'onlineFailed': Bi(
+    'Could not change your status. Please try again.',
+    'تعذّر تغيير حالتك. حاول مرة أخرى.',
+  ),
   'newRequests': Bi('New requests', 'طلبات جديدة'),
   'seeAll': Bi('See all', 'عرض الكل'),
   'reviewQuote': Bi('Review & quote', 'مراجعة وتسعير'),

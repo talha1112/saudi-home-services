@@ -71,6 +71,10 @@ class _AppState extends State<App> with WidgetsBindingObserver {
       api: widget.client.api,
       auth: widget.client.auth,
     ),
+    presence: PresenceController(
+      api: widget.client.api,
+      auth: widget.client.auth,
+    ),
     openFromNotification: _openFromPush,
   );
 
@@ -80,9 +84,21 @@ class _AppState extends State<App> with WidgetsBindingObserver {
   StreamSubscription<PushEvent>? _pushForeground;
   StreamSubscription<PushEvent>? _pushOpened;
 
+  String? _syncedLocale;
+
+  /// Tells the server which language the app is in, so notifications are written in it (sent again after every sign-in).
+  void _languageChanged() {
+    final locale = _state.isArabic ? 'AR' : 'EN';
+    if (locale == _syncedLocale) return;
+    _syncedLocale = locale;
+    unawaited(widget.client.auth.syncLocale(locale));
+  }
+
   @override
   void initState() {
     super.initState();
+    _state.addListener(_languageChanged);
+    _languageChanged();
     WidgetsBinding.instance.addObserver(this);
     widget.client.auth.addListener(_authChanged);
     _authChanged();
@@ -196,7 +212,9 @@ class _AppState extends State<App> with WidgetsBindingObserver {
     unawaited(_pushForeground?.cancel());
     unawaited(_pushOpened?.cancel());
     _quotes.dispose();
+    _services.presence.dispose();
     _jobs.dispose();
+    _state.removeListener(_languageChanged);
     _state.dispose();
     super.dispose();
   }

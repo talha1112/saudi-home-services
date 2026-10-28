@@ -3,6 +3,7 @@ import { ApiError } from '../../common/errors/api-error.js';
 import { parseLocale } from '../../common/i18n/localize.js';
 import { type Page, PageQueryDto, toPage } from '../../common/pagination/pagination.js';
 import { PrismaService } from '../../database/prisma.service.js';
+import { coversInstant } from '../workers/availability.js';
 import type { Locale, Prisma } from '../../generated/prisma/client.js';
 import { type NotificationType, renderNotification } from './notification-templates.js';
 
@@ -114,23 +115,26 @@ export class NotificationsService {
     return created;
   }
 
-  /** A new open request: tell the approved, active workers who offer that service in that city (capped, so a huge pool cannot flood). */
+  /** A new open request: tell the approved, active, online workers who offer that service in that city during their hours (capped, so a huge pool cannot flood). */
   private async notifyEligibleWorkers(payload: { eventId: string; bookingId: string }): Promise<number> {
-    const booking = await this.prisma.booking.findUnique({ where: { id: payload.bookingId }, select: { reference: true, serviceId: true, cityId: true, status: true, customerId: true } });
+    const booking = await this.prisma.booking.findUnique({ where: { id: payload.bookingId }, select: { reference: true, serviceId: true, cityId: true, status: true, customerId: true, preferredStartAt: true } });
     if (!booking || booking.status !== 'OPEN') return 0;
     const workers = await this.prisma.workerProfile.findMany({
       where: {
         verificationStatus: 'APPROVED',
+        isOnline: true,
         user: { status: 'ACTIVE' },
         userId: { not: booking.customerId },
         services: { some: { serviceId: booking.serviceId } },
         serviceAreas: { some: { cityId: booking.cityId } },
       },
-      select: { userId: true },
-      take: 200,
+      select: { userId: true, availability: { select: { dayOfWeek: true, startMinute: true, endMinute: true } } },
+      take: 1000,
     });
+    // Only workers who are online and whose weekly hours cover the requested start are told (no hours set = always).
+    const recipients = workers.filter((w) => coversInstant(w.availability, booking.preferredStartAt)).slice(0, 200);
     let created = 0;
-    for (const w of workers) {
+    for (const w of recipients) {
       const res = await this.create(this.prisma, {
         userId: w.userId,
         type: 'request.new',

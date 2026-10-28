@@ -167,9 +167,17 @@ class PositionSharer extends ChangeNotifier {
       if (wantsPosition(j)) j,
   ];
 
+  /// Asks the phone for location permission once, as soon as a worker is signed in, instead of waiting for the first job that needs it.
+  /// Saying no is fine: the worker can still quote; only live location on a job needs it, and the job screen offers to ask again.
+  Future<void> _askOnce() async {
+    if (_asked || _disposed || !auth.isSignedIn) return;
+    _asked = true;
+    _access = await source.request();
+  }
+
   void start() {
     _timer ??= Timer.periodic(interval, (_) => unawaited(tick()));
-    unawaited(tick());
+    unawaited(_askOnce().then((_) => tick()));
   }
 
   void stop() {

@@ -233,6 +233,28 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
+  String? _locale;
+
+  /// Remembers the app's language ('EN' or 'AR') and tells the server, now if signed in and again after every sign-in, so notifications
+  /// arrive in it. Never fails: a missed update is sent at the next sign-in or language change.
+  Future<void> syncLocale(String locale) async {
+    _locale = locale;
+    if (!isSignedIn) return;
+    try {
+      await authorized((t) => api.setLocale(t, locale));
+    } catch (_) {}
+  }
+
+  /// A short-lived link to the signed-in worker's profile photo, or null (none yet, or it could not be fetched).
+  Future<String?> workerPhotoUrl() async {
+    if (!isSignedIn) return null;
+    try {
+      return await authorized(api.workerPhotoUrl);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Runs [call] with an access token. A 401 renews the session once and retries; if renewal fails the person is signed out locally.
   Future<T> authorized<T>(Future<T> Function(String accessToken) call) async {
     final token = await accessToken();
@@ -326,6 +348,8 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<void> _announceSignedIn() async {
+    final locale = _locale;
+    if (locale != null) unawaited(syncLocale(locale));
     try {
       await onSignedIn?.call();
     } catch (_) {}

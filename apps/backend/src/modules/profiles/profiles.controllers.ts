@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Get, Param, ParseUUIDPipe, Patch, Put } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '../../common/auth/authenticated-user.js';
 import { assertOwnerOrAdmin } from '../../common/auth/ownership.js';
@@ -10,6 +10,8 @@ import {
   AdminUserSummaryDto,
   CustomerProfileDto,
   UpdateCustomerProfileDto,
+  SetOnlineDto,
+  UpdateLocaleDto,
   WorkerJobsDto,
   WorkerProfileDto,
 } from './profiles.dto.js';
@@ -64,6 +66,14 @@ export class WorkersController {
   }
 
   @RequireApprovedWorker()
+  @Put('me/online')
+  @ApiOperation({ summary: 'Go online or offline: an offline worker is shown no new requests and gets no new-request pushes' })
+  @ApiOkResponse({ type: WorkerProfileDto })
+  setOnline(@CurrentUser() user: AuthenticatedUser, @Body() dto: SetOnlineDto): Promise<WorkerProfileDto> {
+    return this.profiles.setOnline(user.id, dto.isOnline);
+  }
+
+  @RequireApprovedWorker()
   @Get('me/jobs')
   @ApiOperation({
     summary: 'My jobs (approved workers only)',
@@ -99,5 +109,20 @@ export class AdminUsersController {
   @ApiOkResponse({ type: AdminUserSummaryDto })
   byId(@Param('userId', new ParseUUIDPipe()) userId: string): Promise<AdminUserSummaryDto> {
     return this.profiles.adminUserSummary(userId);
+  }
+}
+
+@ApiTags('Account')
+@ApiBearerAuth()
+@Roles(Role.CUSTOMER, Role.WORKER)
+@Controller({ path: 'account', version: '1' })
+export class AccountController {
+  constructor(private readonly profiles: ProfilesService) {}
+
+  @Patch('locale')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Set my language, so notifications arrive in it' })
+  async setLocale(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateLocaleDto): Promise<void> {
+    await this.profiles.setLocale(user.id, dto.locale);
   }
 }

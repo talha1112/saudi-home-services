@@ -1,4 +1,4 @@
-import { formatMinutes, parseTime, toAvailabilityRows, toWindow } from './availability.js';
+import { coversInstant, formatMinutes, parseTime, toAvailabilityRows, toWindow } from './availability.js';
 
 const w = (dayOfWeek: number, startTime: string, endTime: string) => ({ dayOfWeek, startTime, endTime });
 
@@ -38,5 +38,29 @@ describe('availability helpers', () => {
     expect(() => toAvailabilityRows([w(1, '08:00', '12:00'), w(1, '12:00', '15:00')])).toThrow('overlap');
     expect(() => toAvailabilityRows([w(1, '08:00', '12:00'), w(2, '08:00', '12:00')])).not.toThrow();
     expect(() => toAvailabilityRows([w(1, '08:00', '12:00'), w(1, '12:01', '15:00')])).not.toThrow();
+  });
+});
+
+describe('coversInstant', () => {
+  // 2026-11-01 is a Sunday; Saudi time is UTC+3, so 06:00Z is 09:00 there.
+  const sundayMorning = new Date('2026-11-01T06:00:00Z');
+  const rows = [{ dayOfWeek: 0, startMinute: 8 * 60, endMinute: 17 * 60 }];
+
+  it('is true inside a window and false just outside it, in Saudi time', () => {
+    expect(coversInstant(rows, sundayMorning)).toBe(true);
+    expect(coversInstant(rows, new Date('2026-11-01T04:59:00Z'))).toBe(false); // 07:59 local
+    expect(coversInstant(rows, new Date('2026-11-01T14:00:00Z'))).toBe(false); // 17:00 local: the end is exclusive
+    expect(coversInstant(rows, new Date('2026-11-01T13:59:00Z'))).toBe(true);
+  });
+  it('follows the local day, not the UTC day', () => {
+    const lateSaturdayUtc = new Date('2026-10-31T22:00:00Z'); // 01:00 on Sunday in Saudi Arabia
+    expect(coversInstant([{ dayOfWeek: 0, startMinute: 0, endMinute: 120 }], lateSaturdayUtc)).toBe(true);
+    expect(coversInstant([{ dayOfWeek: 6, startMinute: 0, endMinute: 1440 }], lateSaturdayUtc)).toBe(false);
+  });
+  it('treats a worker with no hours set as always available', () => {
+    expect(coversInstant([], sundayMorning)).toBe(true);
+  });
+  it('is false on a day with no window', () => {
+    expect(coversInstant(rows, new Date('2026-11-02T06:00:00Z'))).toBe(false);
   });
 });

@@ -64,3 +64,18 @@ export function toAvailabilityRows(windows: AvailabilityWindowInput[]): Availabi
 export function toWindow(row: AvailabilityRow): AvailabilityWindowInput {
   return { dayOfWeek: row.dayOfWeek, startTime: formatMinutes(row.startMinute), endTime: formatMinutes(row.endMinute) };
 }
+
+/** Saudi Arabia has no daylight saving: local time is always UTC+3. */
+const SAUDI_OFFSET_MS = 3 * 3600 * 1000;
+
+/**
+ * Whether a worker's weekly hours cover an instant. A worker who has set no hours at all is treated as always available, so a missing
+ * schedule never hides every request.
+ */
+export function coversInstant(rows: AvailabilityRow[], at: Date): boolean {
+  if (rows.length === 0) return true;
+  const local = new Date(at.getTime() + SAUDI_OFFSET_MS);
+  const day = local.getUTCDay();
+  const minute = local.getUTCHours() * 60 + local.getUTCMinutes();
+  return rows.some((r) => r.dayOfWeek === day && r.startMinute <= minute && minute < r.endMinute);
+}

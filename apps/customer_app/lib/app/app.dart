@@ -11,6 +11,7 @@ import '../features/messages/widgets/chat_target.dart';
 import '../features/bookings/my_bookings_controller.dart';
 import '../features/catalog/catalog_controller.dart';
 import '../features/onboarding/screens/splash_screen.dart';
+import '../features/location/services/device_location.dart';
 import 'app_scope.dart';
 import 'booking_scope.dart';
 import 'auth_scope.dart';
@@ -20,10 +21,17 @@ import 'router/app_router.dart';
 import 'theme/app_theme.dart';
 
 class App extends StatefulWidget {
-  const App({super.key, required this.client});
+  const App({
+    super.key,
+    required this.client,
+    this.deviceLocation = const GeolocatorDeviceLocation(),
+  });
 
   /// Backend client, Firebase phone sign-in and push registration (created in main()).
   final HsClient client;
+
+  /// The phone's location permission and position (replaced in tests).
+  final DeviceLocation deviceLocation;
 
   @override
   State<App> createState() => _AppState();
@@ -66,9 +74,33 @@ class _AppState extends State<App> {
   StreamSubscription<PushEvent>? _pushForeground;
   StreamSubscription<PushEvent>? _pushOpened;
 
+  String? _syncedLocale;
+
+  /// Tells the server which language the app is in, so notifications are written in it (sent again after every sign-in).
+  void _languageChanged() {
+    final locale = _state.isArabic ? 'AR' : 'EN';
+    if (locale == _syncedLocale) return;
+    _syncedLocale = locale;
+    unawaited(widget.client.auth.syncLocale(locale));
+  }
+
+  bool _askedLocation = false;
+
+  /// Once signed in, asks the phone for location permission, so the map can start at the customer's place. Saying no is fine: the address
+  /// can always be searched or the pin moved by hand.
+  void _askLocation() {
+    if (_askedLocation || !widget.client.auth.isSignedIn) return;
+    _askedLocation = true;
+    unawaited(widget.deviceLocation.request());
+  }
+
   @override
   void initState() {
     super.initState();
+    _state.addListener(_languageChanged);
+    _languageChanged();
+    widget.client.auth.addListener(_askLocation);
+    _askLocation();
     // The catalog is public: load it up front so services and cities are ready by the time the customer is signed in.
     _booking.catalog.load();
     _pushForeground = widget.client.push.foreground.listen(_onPushInApp);
@@ -148,6 +180,8 @@ class _AppState extends State<App> {
     _booking.catalog.dispose();
     _booking.submitter.dispose();
     _booking.bookings.dispose();
+    widget.client.auth.removeListener(_askLocation);
+    _state.removeListener(_languageChanged);
     _state.dispose();
     super.dispose();
   }

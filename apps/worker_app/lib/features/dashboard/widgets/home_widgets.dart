@@ -46,10 +46,14 @@ class OnlineToggleCard extends StatelessWidget {
     super.key,
     required this.online,
     required this.onTap,
+    this.areas,
   });
 
   final bool online;
   final VoidCallback onTap;
+
+  /// The cities the worker serves, as the server has them. Null keeps the prototype's sample districts.
+  final String? areas;
 
   @override
   Widget build(BuildContext context) {
@@ -57,8 +61,15 @@ class OnlineToggleCard extends StatelessWidget {
     final title = online
         ? (ar ? 'أنت متصل' : 'You’re online')
         : (ar ? 'أنت غير متصل' : 'You’re offline');
+    final where = areas;
     final sub = online
-        ? (ar
+        ? (where != null
+              ? (where.isEmpty
+                    ? (ar ? 'تستقبل الطلبات الجديدة' : 'Receiving new requests')
+                    : (ar
+                          ? 'تستقبل الطلبات في $where'
+                          : 'Receiving requests in $where'))
+              : ar
               ? 'تستقبل الطلبات في العليا والملقا وحطين'
               : 'Receiving requests in Al Olaya, Al Malqa, Hittin')
         : (ar

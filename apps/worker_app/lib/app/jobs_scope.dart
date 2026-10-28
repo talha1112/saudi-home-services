@@ -13,6 +13,7 @@ class JobsServices {
     required this.sharer,
     required this.notifications,
     required this.reviews,
+    required this.presence,
     required this.openFromNotification,
   });
   final WorkerJobsController jobs;
@@ -26,6 +27,9 @@ class JobsServices {
 
   /// The reviews customers wrote about this worker, with the average.
   final ReviewsController reviews;
+
+  /// The online switch of the home tab, and the cities the worker serves.
+  final PresenceController presence;
 
   /// Opens what a notification is about, the same way a tapped push does.
   final Future<void> Function(PushEvent event) openFromNotification;

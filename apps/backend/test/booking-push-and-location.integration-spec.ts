@@ -92,6 +92,51 @@ run('booking push notifications, chat push and live position (real PostgreSQL, f
     expect(await h.prisma.notification.count({ where: { userId: eligible.userId, type: 'request.new' } })).toBe(1);
   });
 
+  it('an offline worker, or one whose weekly hours do not cover the requested start, is neither shown the request nor pushed', async () => {
+    const customer = await h.makeCustomer();
+    const start = new Date(Date.now() + 5 * 24 * 3_600_000);
+    const local = new Date(start.getTime() + 3 * 3_600_000); // Saudi time is UTC+3 all year
+    const day = local.getUTCDay();
+    const minute = local.getUTCHours() * 60 + local.getUTCMinutes();
+    const worker = async (hours: { dayOfWeek: number; startMinute: number; endMinute: number }[], online = true) => {
+      const w = await withPhone(await h.makeWorker([ref.service.id], [ref.city.id]));
+      await h.prisma.workerProfile.update({ where: { id: w.workerId }, data: { isOnline: online } });
+      if (hours.length) await h.prisma.workerAvailability.createMany({ data: hours.map((x) => ({ ...x, workerProfileId: w.workerId })) });
+      return w;
+    };
+    const inside = await worker([{ dayOfWeek: day, startMinute: Math.max(0, minute - 60), endMinute: Math.min(1440, minute + 60) }]);
+    const noHours = await worker([]);
+    const otherDay = await worker([{ dayOfWeek: (day + 1) % 7, startMinute: 0, endMinute: 1440 }]);
+    const wrongTime = await worker(minute >= 600 ? [{ dayOfWeek: day, startMinute: 0, endMinute: 300 }] : [{ dayOfWeek: day, startMinute: 1000, endMinute: 1400 }]);
+    const offline = await worker([{ dayOfWeek: day, startMinute: 0, endMinute: 1440 }], false);
+
+    const booking = await h.createBooking(customer, ref, { preferredStartAt: start.toISOString(), preferredEndAt: new Date(start.getTime() + 3_600_000).toISOString() });
+    await dispatcher.runOnce();
+
+    for (const w of [inside, noHours]) expect(await types(w.userId)).toContain('request.new');
+    for (const w of [otherDay, wrongTime, offline]) expect(await types(w.userId)).not.toContain('request.new');
+
+    const feed = async (w: { accessToken: string }) => (await h.api().get('/api/v1/workers/me/requests').set(h.bearer(w.accessToken)).expect(200)).body.items.map((r: { id: string }) => r.id);
+    for (const w of [inside, noHours]) expect(await feed(w)).toContain(booking.id);
+    for (const w of [otherDay, wrongTime, offline]) expect(await feed(w)).not.toContain(booking.id);
+
+    // coming back online shows it again
+    await h.api().put('/api/v1/workers/me/online').set(h.bearer(offline.accessToken)).send({ isOnline: true }).expect(200);
+    await h.prisma.workerAvailability.deleteMany({ where: { workerProfileId: offline.workerId } });
+    expect(await feed(offline)).toContain(booking.id);
+  });
+
+  it('only an approved worker can switch online and offline, and the choice is kept', async () => {
+    const approved = await h.makeWorker([ref.service.id], [ref.city.id]);
+    const off = await h.api().put('/api/v1/workers/me/online').set(h.bearer(approved.accessToken)).send({ isOnline: false }).expect(200);
+    expect(off.body.isOnline).toBe(false);
+    expect((await h.api().get('/api/v1/workers/me').set(h.bearer(approved.accessToken)).expect(200)).body.isOnline).toBe(false);
+    await h.api().put('/api/v1/workers/me/online').set(h.bearer(approved.accessToken)).send({ isOnline: 'yes' }).expect(400);
+    const pending = await h.makeWorker([ref.service.id], [ref.city.id], WorkerVerificationStatus.SUBMITTED);
+    await h.api().put('/api/v1/workers/me/online').set(h.bearer(pending.accessToken)).send({ isOnline: true }).expect(403);
+    await h.api().put('/api/v1/workers/me/online').send({ isOnline: true }).expect(401);
+  });
+
   it('every step of the booking reaches the other side by push, with the booking to open and no private text', async () => {
     const { customer, worker, booking } = await openRequest();
     expect(await types(worker.userId)).toContain('request.new');

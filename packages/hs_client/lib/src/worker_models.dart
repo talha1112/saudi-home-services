@@ -105,19 +105,23 @@ class Catalog {
 }
 
 class WorkerProfileData {
-  const WorkerProfileData({this.fullName, this.fullNameAr, this.bio, this.yearsOfExperience});
+  const WorkerProfileData({this.fullName, this.fullNameAr, this.bio, this.yearsOfExperience, this.isOnline = true});
 
   factory WorkerProfileData.fromJson(Map<String, dynamic> json) => WorkerProfileData(
     fullName: json['fullName'] as String?,
     fullNameAr: json['fullNameAr'] as String?,
     bio: json['bio'] as String?,
     yearsOfExperience: (json['yearsOfExperience'] as num?)?.toInt(),
+    isOnline: json['isOnline'] as bool? ?? true,
   );
 
   final String? fullName;
   final String? fullNameAr;
   final String? bio;
   final int? yearsOfExperience;
+
+  /// Whether the worker receives new requests (the switch on the home tab).
+  final bool isOnline;
 }
 
 class AvailabilityWindow {
@@ -248,12 +252,14 @@ class WorkerOnboarding {
     required this.availability,
     required this.documents,
     required this.verification,
+    this.cities = const [],
   });
 
   factory WorkerOnboarding.fromJson(Map<String, dynamic> json) => WorkerOnboarding(
     profile: WorkerProfileData.fromJson(json['profile'] as Map<String, dynamic>? ?? const {}),
     serviceIds: {for (final s in (json['services'] as List<dynamic>? ?? const [])) (s as Map<String, dynamic>)['id'] as String},
     cityIds: {for (final c in (json['cities'] as List<dynamic>? ?? const [])) (c as Map<String, dynamic>)['id'] as String},
+    cities: [for (final c in (json['cities'] as List<dynamic>? ?? const [])) City.fromJson(c as Map<String, dynamic>)],
     availability: [for (final a in (json['availability'] as List<dynamic>? ?? const [])) AvailabilityWindow.fromJson(a as Map<String, dynamic>)],
     documents: [for (final d in (json['documents'] as List<dynamic>? ?? const [])) WorkerDocument.fromJson(d as Map<String, dynamic>)],
     verification: VerificationInfo.fromJson(json['verification'] as Map<String, dynamic>? ?? const {}),
@@ -262,6 +268,9 @@ class WorkerOnboarding {
   final WorkerProfileData profile;
   final Set<String> serviceIds;
   final Set<String> cityIds;
+
+  /// The cities the worker serves, with their names.
+  final List<City> cities;
   final List<AvailabilityWindow> availability;
   final List<WorkerDocument> documents;
   final VerificationInfo verification;

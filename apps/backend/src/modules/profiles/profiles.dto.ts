@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsString, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsString, MaxLength, MinLength } from 'class-validator';
 import { Locale, Role, UserStatus, WorkerVerificationStatus } from '../../generated/prisma/client.js';
 
 export class CustomerProfileDto {
@@ -45,4 +45,16 @@ export class AdminUserSummaryDto {
   @ApiPropertyOptional({ enum: WorkerVerificationStatus }) workerVerificationStatus?: WorkerVerificationStatus;
   @ApiProperty() createdAt: string;
   @ApiProperty({ nullable: true }) lastLoginAt: string | null;
+}
+
+export class UpdateLocaleDto {
+  @ApiProperty({ enum: Locale, description: 'The language of the app; notifications are written in it' })
+  @IsEnum(Locale)
+  locale: Locale;
+}
+
+export class SetOnlineDto {
+  @ApiProperty({ description: 'true = receive new requests, false = take a break' })
+  @IsBoolean()
+  isOnline: boolean;
 }

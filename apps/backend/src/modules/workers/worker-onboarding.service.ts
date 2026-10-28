@@ -23,6 +23,7 @@ import type {
 } from './dto/worker-onboarding.dto.js';
 import { FileIntakeService, FileRejectedError } from '../storage/file-intake.service.js';
 import { FileScanService } from '../storage/file-scan.service.js';
+import { isServable } from '../storage/file-access.js';
 import { StorageDeletionService } from '../storage/storage-deletion.service.js';
 import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_BYTES } from './dto/worker-onboarding.dto.js';
 import { DocumentStorage } from './storage/document-storage.js';
@@ -56,6 +57,8 @@ export class WorkerOnboardingService {
   private readonly cfg: WorkersConfig;
   private readonly maxFileBytes: number;
   private readonly uploadUrlTtl: number;
+  private readonly photoUrlTtl: number;
+  private readonly requireCleanScan: boolean;
 
   constructor(
     config: ConfigService,
@@ -69,9 +72,22 @@ export class WorkerOnboardingService {
     this.cfg = config.getOrThrow<AppConfig>(APP_CONFIG).workers;
     this.maxFileBytes = config.getOrThrow<AppConfig>(APP_CONFIG).storage.maxFileBytes;
     this.uploadUrlTtl = config.getOrThrow<AppConfig>(APP_CONFIG).storage.urlTtl.upload;
+    this.photoUrlTtl = config.getOrThrow<AppConfig>(APP_CONFIG).storage.urlTtl.identityDocumentView;
+    this.requireCleanScan = config.getOrThrow<AppConfig>(APP_CONFIG).storage.requireCleanScan;
   }
 
   // ------------------------------------------------------------------- reads
+
+  /** A short-lived link to the worker's own profile photo, or null while there is none (or it is not yet safe to show). */
+  async profilePhoto(userId: string): Promise<{ url: string | null; expiresAt: string | null }> {
+    const profile = await this.load(userId);
+    const photo = profile.documents
+      .filter((d) => d.type === 'PHOTO' && d.status !== DocumentStatus.PENDING_UPLOAD && d.status !== DocumentStatus.REJECTED && isServable(d.scanStatus, this.requireCleanScan))
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+    if (!photo) return { url: null, expiresAt: null };
+    const target = await this.storage.createDownloadTarget(photo.storageKey, this.photoUrlTtl);
+    return { url: target.url, expiresAt: target.expiresAt.toISOString() };
+  }
 
   async overview(userId: string): Promise<WorkerOnboardingDto> {
     return this.toOverview(await this.load(userId));

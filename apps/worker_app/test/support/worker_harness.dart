@@ -67,6 +67,7 @@ JobsServices makeJobsServices(TestHsClient kit, {PositionSource? source}) {
     ),
     notifications: NotificationsController(api: kit.api, auth: kit.client.auth),
     reviews: ReviewsController(api: kit.api, auth: kit.client.auth),
+    presence: PresenceController(api: kit.api, auth: kit.client.auth),
     openFromNotification: (_) async {},
   );
 }

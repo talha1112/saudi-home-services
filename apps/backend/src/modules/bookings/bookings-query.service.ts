@@ -3,6 +3,7 @@ import { type Page, toPage } from '../../common/pagination/pagination.js';
 import { PrismaService } from '../../database/prisma.service.js';
 import { BookingStatus, Prisma, QuoteStatus } from '../../generated/prisma/client.js';
 import { notFound } from './booking-support.js';
+import { coversInstant } from '../workers/availability.js';
 import { QuotesService, type WorkerContext } from './quotes.service.js';
 import type {
   AdminBookingDetailDto,
@@ -245,9 +246,13 @@ export class BookingsQueryService {
 
   // ======================================================================== worker
 
-  /** OPEN requests this worker can quote on: right service, right city, not expired. */
+  /**
+   * OPEN requests this worker can quote on: right service, right city, not expired, the worker is online, and the requested start falls
+   * inside the weekly hours they set (no hours set = no filter).
+   */
   async requests(workerUserId: string, q: ListRequestsQueryDto): Promise<Page<WorkerRequestSummaryDto>> {
     const worker = await this.quotes.workerContext(workerUserId);
+    if (!worker.isOnline) return toPage([], 0, q);
     const now = new Date();
     const serviceIds = [...worker.serviceIds.keys()].filter((id) => !q.serviceId || id === q.serviceId);
     const cityIds = [...worker.cityIds].filter((id) => !q.cityId || id === q.cityId);
@@ -262,17 +267,18 @@ export class BookingsQueryService {
         ? { preferredStartAt: { ...(q.startFrom ? { gte: new Date(q.startFrom) } : {}), ...(q.startTo ? { lt: new Date(q.startTo) } : {}) } }
         : {}),
     };
-    const [rows, total] = await Promise.all([
-      this.prisma.booking.findMany({
-        where,
-        orderBy: q.sort === 'soonest' ? [{ preferredStartAt: 'asc' }, { id: 'asc' }] : [{ createdAt: 'desc' }, { id: 'desc' }],
-        skip: q.skip,
-        take: q.limit,
-        include: { service: SERVICE_SELECT, city: CITY_SELECT, quotes: { where: { workerProfileId: worker.id }, include: { booking: { select: { reference: true } } } } },
-      }),
-      this.prisma.booking.count({ where }),
-    ]);
-    return toPage(rows.map((r) => this.toRequestSummary(r, now)), total, q);
+    const include = { service: SERVICE_SELECT, city: CITY_SELECT, quotes: { where: { workerProfileId: worker.id }, include: { booking: { select: { reference: true } } } } };
+    const orderBy: Prisma.BookingOrderByWithRelationInput[] = q.sort === 'soonest' ? [{ preferredStartAt: 'asc' }, { id: 'asc' }] : [{ createdAt: 'desc' }, { id: 'desc' }];
+
+    if (worker.hours.length === 0) {
+      const [rows, total] = await Promise.all([this.prisma.booking.findMany({ where, orderBy, skip: q.skip, take: q.limit, include }), this.prisma.booking.count({ where })]);
+      return toPage(rows.map((r) => this.toRequestSummary(r, now)), total, q);
+    }
+    // The hours are weekly windows in Saudi time, so they are applied here rather than in SQL. The pool is bounded by city, service and
+    // expiry, and a worker looks at the newest few hundred at most.
+    const pool = await this.prisma.booking.findMany({ where, orderBy, take: 500, include });
+    const inHours = pool.filter((r) => coversInstant(worker.hours, r.preferredStartAt));
+    return toPage(inHours.slice(q.skip, q.skip + q.limit).map((r) => this.toRequestSummary(r, now)), inHours.length, q);
   }
 
   async requestDetail(workerUserId: string, bookingId: string): Promise<WorkerRequestDetailDto> {

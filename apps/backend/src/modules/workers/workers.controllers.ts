@@ -100,6 +100,12 @@ export class WorkerOnboardingController {
     return this.onboarding.listDocuments(user.id);
   }
 
+  @Get('photo')
+  @ApiOperation({ summary: 'A short-lived link to my profile photo (url is null while I have none)' })
+  photo(@CurrentUser() user: AuthenticatedUser) {
+    return this.onboarding.profilePhoto(user.id);
+  }
+
   @Post('documents')
   @RateLimit({ name: 'file-register', limit: 120, windowSeconds: 600 })
   @ApiOperation({

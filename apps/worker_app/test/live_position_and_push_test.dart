@@ -100,6 +100,21 @@ void main() {
     PositionSharer sharer() => services.sharer;
 
     test(
+      'starting after sign-in asks for location permission once, even with no job yet, and never twice',
+      () async {
+        await setUpSharer();
+        sharer().start();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(source.requests, 1);
+        sharer().stop();
+        sharer().start();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(source.requests, 1);
+        sharer().stop();
+      },
+    );
+
+    test(
       'a paid job close to its time: the phone\'s position goes to the backend for that booking',
       () async {
         await setUpSharer(

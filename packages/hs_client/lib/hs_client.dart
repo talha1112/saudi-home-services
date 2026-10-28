@@ -13,6 +13,7 @@ export 'src/errors.dart';
 export 'src/hs_client.dart';
 export 'src/models.dart';
 export 'src/phone_auth_gateway.dart';
+export 'src/presence_controller.dart';
 export 'src/push_service.dart';
 export 'src/storage.dart';
 export 'src/worker_job_models.dart';

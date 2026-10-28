@@ -183,12 +183,12 @@ class FakeApi extends HsApi {
   };
 
   Map<String, dynamic> _onboardingJson() => {
-    'profile': {'id': 'wp-1', 'fullName': fullName, 'fullNameAr': fullNameAr, 'bio': bio, 'yearsOfExperience': yearsOfExperience, 'isOnline': false},
+    'profile': {'id': 'wp-1', 'fullName': fullName, 'fullNameAr': fullNameAr, 'bio': bio, 'yearsOfExperience': yearsOfExperience, 'isOnline': workerOnline},
     'services': [
       for (final id in workerServices) {'id': id},
     ],
     'cities': [
-      for (final id in workerCities) {'id': id},
+      for (final id in workerCities) {'id': id, 'nameEn': cityNames[id] ?? id, 'nameAr': cityNames[id] ?? id},
     ],
     'availability': [for (final w in workerWindows) w.toJson()],
     'documents': workerDocuments,
@@ -749,6 +749,34 @@ class FakeApi extends HsApi {
   Future<ReceivedReviews> receivedReviews(String accessToken, {int limit = 10}) async {
     calls.add('receivedReviews');
     return receivedReviewsResult;
+  }
+
+  bool workerOnline = true;
+  final Map<String, String> cityNames = {};
+  Object? onlineResult; // an Exception makes the switch fail
+
+  @override
+  Future<bool> setWorkerOnline(String accessToken, bool online) async {
+    calls.add('setWorkerOnline');
+    final r = onlineResult;
+    if (r is Exception) throw r;
+    workerOnline = online;
+    return online;
+  }
+
+  String? lastLocale;
+  String? photoUrlResult;
+
+  @override
+  Future<void> setLocale(String accessToken, String locale) async {
+    calls.add('setLocale');
+    lastLocale = locale;
+  }
+
+  @override
+  Future<String?> workerPhotoUrl(String accessToken) async {
+    calls.add('workerPhotoUrl');
+    return photoUrlResult;
   }
 
   @override

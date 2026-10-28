@@ -100,6 +100,7 @@ Future<_Rig> _launch(
   final rig = _Rig(tester, status: status);
   prepare?.call(rig);
   addTearDown(rig.kit.client.auth.dispose);
+  await rig.kit.client.auth.restore(); // as main() does before the app starts
   await tester.pumpWidget(
     App(client: rig.kit.client, documentPicker: rig.picker),
   );
