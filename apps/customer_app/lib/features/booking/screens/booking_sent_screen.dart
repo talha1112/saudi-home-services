@@ -13,9 +13,16 @@ import '../logic/booking_schedule.dart';
 /// Shown after the backend created the request. Everything on it comes from the backend's response: the reference, the status and the
 /// requested window. No payment is taken at this point: the backend only asks for payment after the customer accepts a quote.
 class BookingSentScreen extends StatelessWidget {
-  const BookingSentScreen({super.key, required this.booking});
+  const BookingSentScreen({
+    super.key,
+    required this.booking,
+    this.photosFailed = 0,
+  });
 
   final BookingView booking;
+
+  /// How many of the chosen photos could not be attached (the request itself was sent).
+  final int photosFailed;
 
   @override
   Widget build(BuildContext context) {
@@ -98,6 +105,19 @@ class BookingSentScreen extends StatelessWidget {
                         ],
                       ),
                     ),
+                    if (photosFailed > 0) ...[
+                      const SizedBox(height: 14),
+                      InfoNote(
+                        context
+                            .tr('phFailed')
+                            .replaceAll('{n}', '$photosFailed'),
+                        key: const Key('photos-failed'),
+                        icon: 'alert',
+                        bg: AppColors.cream,
+                        fg: AppColors.creamDeep,
+                        iconColor: AppColors.creamDeep,
+                      ),
+                    ],
                   ],
                 ),
               ),

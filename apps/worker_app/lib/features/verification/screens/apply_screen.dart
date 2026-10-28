@@ -6,8 +6,10 @@ import '../../../app/theme/app_colors.dart';
 import '../../../core/extensions/context_extensions.dart';
 import '../../../core/utils/text_styles.dart';
 import '../../../shared/components/cards.dart';
+import '../../../shared/components/sheets.dart';
 import '../../../shared/components/step_bar.dart';
 import '../../../shared/widgets/app_button.dart';
+import '../../../shared/widgets/tap.dart';
 import '../../../shared/widgets/tiles.dart';
 import '../services/document_picker.dart';
 import '../utils/onboarding_text.dart';
@@ -161,9 +163,19 @@ class _ApplyScreenState extends State<ApplyScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _upload(DocumentKind kind) async {
-    final picked = await DocumentPickerScope.of(
-      context,
-    ).pick(imagesOnly: kind == DocumentKind.photo);
+    final picker = DocumentPickerScope.of(context);
+    var camera = false;
+    if (picker.hasCamera) {
+      final choice = await showAppSheet<bool>(
+        context,
+        builder: (_) => const _SourceSheet(),
+      );
+      if (choice == null || !mounted) return;
+      camera = choice;
+    }
+    final picked = camera
+        ? await picker.takePhoto()
+        : await picker.pick(imagesOnly: kind == DocumentKind.photo);
     if (picked == null || !mounted) return;
     await context.onboardingRead.uploadDocument(
       kind: kind,
@@ -339,4 +351,42 @@ class _LoadError extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// "Take a photo" or "Choose a file": pops true for the camera, false for the file chooser.
+class _SourceSheet extends StatelessWidget {
+  const _SourceSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    Widget option(String key, String icon, String label, bool camera) => Tap(
+      key: Key(key),
+      onTap: () => Navigator.of(context).pop(camera),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.lineSoft, width: 1.5),
+        ),
+        child: Row(
+          children: [
+            IconTile(icon, size: 40, radius: 13, iconSize: 19),
+            const SizedBox(width: 12),
+            Expanded(child: Text(label, style: ts(15, w: 600))),
+          ],
+        ),
+      ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(context.tr('srcTitle'), style: ts(20, w: 700)),
+        const SizedBox(height: 14),
+        option('source-camera', 'camera', context.tr('srcCamera'), true),
+        option('source-file', 'file', context.tr('srcFile'), false),
+      ],
+    );
+  }
 }

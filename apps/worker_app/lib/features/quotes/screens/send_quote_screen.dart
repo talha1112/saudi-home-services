@@ -27,9 +27,17 @@ const _validity = [
 /// Sends a quote on an open request (`POST /workers/me/requests/:id/quote`). The worker types only their own price; the server prices VAT,
 /// commission and the total, and the card shown afterwards is exactly what it answered.
 class SendQuoteScreen extends StatefulWidget {
-  const SendQuoteScreen({super.key, required this.request, this.clock});
+  const SendQuoteScreen({
+    super.key,
+    required this.request,
+    this.clock,
+    this.existing,
+  });
 
   final WorkerRequest request;
+
+  /// The worker's live quote when they are changing it instead of sending a first one.
+  final WorkerQuote? existing;
 
   /// The current time (tests replace it).
   final DateTime Function()? clock;
@@ -45,6 +53,19 @@ class _SendQuoteScreenState extends State<SendQuoteScreen> {
   WorkerQuote? _sent;
 
   DateTime get _now => (widget.clock ?? DateTime.now)();
+
+  @override
+  void initState() {
+    super.initState();
+    final q = widget.existing;
+    if (q != null) {
+      final sar = q.money.serviceHalalas / 100;
+      _price.text = sar == sar.roundToDouble()
+          ? sar.round().toString()
+          : sar.toStringAsFixed(2);
+      _message.text = q.message ?? '';
+    }
+  }
 
   @override
   void dispose() {
@@ -68,16 +89,17 @@ class _SendQuoteScreenState extends State<SendQuoteScreen> {
       preferredEnd: r.preferredEndAt,
       now: _now,
     );
-    final quote = await quotes.submit(
-      r.id,
-      SubmitQuoteRequest(
-        priceHalalas: halalas,
-        proposedStartAt: w.start,
-        proposedEndAt: w.end,
-        message: _message.text,
-        validForHours: _validity[_validityIndex].$2,
-      ),
+    final body = SubmitQuoteRequest(
+      priceHalalas: halalas,
+      proposedStartAt: w.start,
+      proposedEndAt: w.end,
+      message: _message.text,
+      validForHours: _validity[_validityIndex].$2,
     );
+    final existing = widget.existing;
+    final quote = existing == null
+        ? await quotes.submit(r.id, body)
+        : await quotes.revise(r.id, existing, body);
     if (!mounted) return;
     if (quote != null) setState(() => _sent = quote);
   }
@@ -115,8 +137,16 @@ class _SendQuoteScreenState extends State<SendQuoteScreen> {
                             ),
                             Text(
                               sent == null
-                                  ? context.tr('wjSendQuote')
-                                  : context.tr('wjQuoteSent'),
+                                  ? context.tr(
+                                      widget.existing == null
+                                          ? 'wjSendQuote'
+                                          : 'wjEditQuote',
+                                    )
+                                  : context.tr(
+                                      widget.existing == null
+                                          ? 'wjQuoteSent'
+                                          : 'wjQuoteSaved',
+                                    ),
                               style: ts(18, w: 700),
                             ),
                           ],
@@ -136,7 +166,11 @@ class _SendQuoteScreenState extends State<SendQuoteScreen> {
                           key: const Key('quote-send'),
                           label: sending
                               ? context.tr('wjSending')
-                              : context.tr('wjSendQuote'),
+                              : context.tr(
+                                  widget.existing == null
+                                      ? 'wjSendQuote'
+                                      : 'wjSaveQuote',
+                                ),
                           enabled: !sending && _halalas != null,
                           onPressed: _send,
                         )

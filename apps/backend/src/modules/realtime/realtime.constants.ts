@@ -64,6 +64,6 @@ export const KEYS = {
 } as const;
 
 /** Booking event types that only the customer should hear about (competing-quote activity). */
-export const CUSTOMER_ONLY_EVENT_TYPES: readonly string[] = ['BOOKING_CREATED', 'QUOTE_SUBMITTED', 'QUOTE_REVISED', 'QUOTE_WITHDRAWN', 'QUOTE_REJECTED', 'QUOTE_EXPIRED'];
+export const CUSTOMER_ONLY_EVENT_TYPES: readonly string[] = ['BOOKING_CREATED', 'QUOTE_SUBMITTED', 'QUOTE_REVISED', 'QUOTE_WITHDRAWN', 'QUOTE_REJECTED', 'QUOTE_EXPIRED', 'QUOTE_CHANGE_REQUESTED'];
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

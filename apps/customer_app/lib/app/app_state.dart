@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/config/demo_data.dart';
 import '../features/booking/logic/booking_schedule.dart';
 import '../features/booking/logic/booking_submitter.dart';
+import '../features/booking/logic/picked_photo.dart';
 import '../features/location/models/picked_location.dart';
 import '../shared/models/mock_data.dart';
 import '../shared/models/service.dart';
@@ -54,6 +55,9 @@ class AppState extends ChangeNotifier {
   int slotIndex = -1;
   String description = '';
 
+  /// Problem photos chosen for the booking in progress; they are attached once the request exists.
+  final List<PickedPhoto> photos = [];
+
   BookingDraft get draft => BookingDraft(
     serviceId: serviceId,
     cityId: cityId,
@@ -102,6 +106,7 @@ class AppState extends ChangeNotifier {
     dateIndex = date ?? 0;
     slotIndex = slot ?? -1;
     description = '';
+    photos.clear();
     rejectedQuotes.clear();
     notifyListeners();
   }
@@ -115,6 +120,7 @@ class AppState extends ChangeNotifier {
     dateIndex = 0;
     slotIndex = -1;
     description = '';
+    photos.clear();
     rejectedQuotes.clear();
     notifyListeners();
   }

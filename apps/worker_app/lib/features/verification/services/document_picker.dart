@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/widgets.dart';
+import 'package:image_picker/image_picker.dart';
 
 /// A document chosen by the person, read into memory (the backend allows at most 10 MB).
 class PickedDocument {
@@ -17,11 +18,38 @@ abstract class DocumentPicker {
   ///
   /// With [imagesOnly] only JPEG and PNG can be chosen (the profile photo).
   Future<PickedDocument?> pick({bool imagesOnly = false});
+
+  /// Whether the phone's camera can be offered as a second way to add the file.
+  bool get hasCamera;
+
+  /// Takes a photo with the camera, or null when the person cancelled or it could not be read.
+  Future<PickedDocument?> takePhoto();
 }
 
 /// The system file chooser, limited to the types the backend accepts (JPEG, PNG, PDF).
 class SystemDocumentPicker implements DocumentPicker {
   const SystemDocumentPicker();
+
+  @override
+  bool get hasCamera => true;
+
+  @override
+  Future<PickedDocument?> takePhoto() async {
+    try {
+      final shot = await ImagePicker().pickImage(
+        source: ImageSource.camera,
+        maxWidth: 2000,
+        imageQuality: 85,
+      );
+      if (shot == null) return null;
+      return PickedDocument(
+        name: 'camera.jpg',
+        bytes: await shot.readAsBytes(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
 
   @override
   Future<PickedDocument?> pick({bool imagesOnly = false}) async {

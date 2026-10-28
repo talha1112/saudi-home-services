@@ -296,6 +296,54 @@ export class BookingLifecycleService {
     }
   }
 
+  /** The customer turns one quote down. The booking stays OPEN so the other quotes (and new ones) can still be chosen. */
+  async rejectQuote(customerId: string, bookingId: string, quoteId: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await lockBooking(tx, bookingId);
+      const booking = await tx.booking.findFirst({ where: { id: bookingId, customerId }, select: { id: true, status: true } });
+      if (!booking) throw notFound('Booking');
+      if (booking.status !== BookingStatus.OPEN) throw conflict('INVALID_STATE', `This cannot be done while the booking is ${booking.status}`, { status: booking.status });
+      const quote = await tx.quote.findFirst({ where: { id: quoteId, bookingId }, select: { id: true, status: true, priceHalalas: true } });
+      if (!quote) throw notFound('Quote');
+      if (quote.status !== QuoteStatus.SUBMITTED) throw conflict('QUOTE_NOT_AVAILABLE', `This quote can no longer be rejected (${quote.status})`, { status: quote.status });
+      const moved = await tx.quote.updateMany({ where: { id: quote.id, status: QuoteStatus.SUBMITTED }, data: { status: QuoteStatus.REJECTED } });
+      if (moved.count !== 1) throw conflict('QUOTE_NOT_AVAILABLE', 'This quote can no longer be rejected');
+      await recordEvent(tx, {
+        bookingId,
+        type: BookingEventType.QUOTE_REJECTED,
+        quoteId: quote.id,
+        actorUserId: customerId,
+        actorRole: Role.CUSTOMER,
+        amountHalalas: quote.priceHalalas,
+        note: 'Rejected by the customer',
+      });
+    });
+  }
+
+  /** The customer asks the worker to change a quote. Nothing about the quote changes until the worker edits it (which clears the request). */
+  async requestQuoteChange(customerId: string, bookingId: string, quoteId: string, message: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await lockBooking(tx, bookingId);
+      const booking = await tx.booking.findFirst({ where: { id: bookingId, customerId }, select: { id: true, status: true } });
+      if (!booking) throw notFound('Booking');
+      if (booking.status !== BookingStatus.OPEN) throw conflict('INVALID_STATE', `This cannot be done while the booking is ${booking.status}`, { status: booking.status });
+      const quote = await tx.quote.findFirst({ where: { id: quoteId, bookingId }, select: { id: true, status: true, priceHalalas: true, validUntil: true } });
+      if (!quote) throw notFound('Quote');
+      if (quote.status !== QuoteStatus.SUBMITTED || quote.validUntil.getTime() <= Date.now()) {
+        throw conflict('QUOTE_NOT_AVAILABLE', `This quote can no longer be changed (${quote.status})`, { status: quote.status });
+      }
+      await tx.quote.update({ where: { id: quote.id }, data: { changeRequest: message, changeRequestedAt: new Date() } });
+      await recordEvent(tx, {
+        bookingId,
+        type: BookingEventType.QUOTE_CHANGE_REQUESTED,
+        quoteId: quote.id,
+        actorUserId: customerId,
+        actorRole: Role.CUSTOMER,
+        amountHalalas: quote.priceHalalas,
+      });
+    });
+  }
+
   // ------------------------------------------------------- worker operations
 
   startWork(workerProfileId: string, workerUserId: string, bookingId: string): Promise<void> {
@@ -455,6 +503,20 @@ export class BookingLifecycleService {
         throw conflict('CASH_NOT_DUE_YET', `Cash can be confirmed once the work has started (the booking is ${booking.status})`, { status: booking.status });
       }
       await tx.booking.update({ where: { id: bookingId }, data: { cashCollectedAt: new Date() } });
+    });
+  }
+
+  /** The assigned worker says they have reached the customer. Only a paid (CONFIRMED) booking; saying it again changes nothing. */
+  async markArrived(workerProfileId: string, bookingId: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await lockBooking(tx, bookingId);
+      const booking = await tx.booking.findFirst({ where: { id: bookingId, workerProfileId }, select: { id: true, status: true, arrivedAt: true } });
+      if (!booking) throw notFound('Booking'); // another worker's booking looks exactly like a missing one
+      if (booking.arrivedAt !== null) return;
+      if (booking.status !== BookingStatus.CONFIRMED) {
+        throw conflict('INVALID_STATE', `Arrival can be reported on a paid booking that has not started (the booking is ${booking.status})`, { status: booking.status });
+      }
+      await tx.booking.update({ where: { id: bookingId }, data: { arrivedAt: new Date() } });
     });
   }
 

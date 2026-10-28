@@ -332,6 +332,53 @@ run('bookings and quotations (real PostgreSQL, full HTTP stack)', () => {
 
   // ------------------------------------------------- the paid, in-progress job
 
+  describe('rejecting a quote and asking for a change', () => {
+    it('lets the owner reject one quote (the booking stays open) and ask a worker to change another', async () => {
+      const customer = await h.makeCustomer();
+      const stranger = await h.makeCustomer();
+      const booking = await h.createBooking(customer, ref);
+      const qa = await h.submitQuote(worker, booking.id, { priceHalalas: 25000 });
+      const qb = await h.submitQuote(worker2, booking.id, { priceHalalas: 22000 });
+      const base = `/api/v1/bookings/${booking.id}/quotes`;
+
+      // asking for a change: validated, owner only, customer role only
+      await h.api().post(`${base}/${qa.id}/request-change`).set(bearer(customer.accessToken)).send({ message: 'x' }).expect(400);
+      await h.api().post(`${base}/${qa.id}/request-change`).set(bearer(stranger.accessToken)).send({ message: 'Please lower the price' }).expect(404);
+      await h.api().post(`${base}/${qa.id}/request-change`).set(bearer(worker.accessToken)).send({ message: 'Please lower the price' }).expect(403);
+      await h.api().post(`${base}/${qa.id}/request-change`).set(bearer(customer.accessToken)).send({ message: '  Please lower the price  ' }).expect(200);
+
+      const mine = await h.api().get('/api/v1/workers/me/quotes').set(bearer(worker.accessToken)).expect(200);
+      expect(mine.body.items.find((q: { id: string }) => q.id === qa.id).changeRequest).toBe('Please lower the price');
+      const seen = await h.api().get(`${base}`).set(bearer(customer.accessToken)).expect(200);
+      expect(seen.body.items.find((q: { id: string }) => q.id === qa.id)).toMatchObject({ changeRequest: 'Please lower the price', version: 1 });
+      expect(await h.prisma.bookingEvent.count({ where: { bookingId: booking.id, type: 'QUOTE_CHANGE_REQUESTED' } })).toBe(1);
+
+      // the worker editing the quote answers the request
+      await h.api().patch(`/api/v1/workers/me/quotes/${qa.id}`).set(bearer(worker.accessToken)).send({ priceHalalas: 21000 }).expect(200);
+      const after = await h.api().get(`${base}`).set(bearer(customer.accessToken)).expect(200);
+      expect(after.body.items.find((q: { id: string }) => q.id === qa.id)).toMatchObject({ changeRequest: null, version: 2 });
+
+      // rejecting: owner and customer role only; the booking stays OPEN and the other quote can still be chosen
+      await h.api().post(`${base}/${qb.id}/reject`).set(bearer(stranger.accessToken)).expect(404);
+      await h.api().post(`${base}/${qb.id}/reject`).set(bearer(worker2.accessToken)).expect(403);
+      const rejected = await h.api().post(`${base}/${qb.id}/reject`).set(bearer(customer.accessToken)).expect(200);
+      expect(rejected.body.status).toBe('OPEN');
+      expect((await h.prisma.quote.findUniqueOrThrow({ where: { id: qb.id } })).status).toBe('REJECTED');
+      expect((await h.api().post(`${base}/${qb.id}/reject`).set(bearer(customer.accessToken)).expect(409)).body.code).toBe('QUOTE_NOT_AVAILABLE');
+      await h.api().post(`${base}/${qb.id}/request-change`).set(bearer(customer.accessToken)).send({ message: 'Please lower the price' }).expect(409);
+      const live = await h.api().get(`${base}`).set(bearer(customer.accessToken)).expect(200);
+      expect(live.body.items.map((q: { id: string }) => q.id)).toEqual([qa.id]);
+      expect(await h.prisma.bookingEvent.count({ where: { bookingId: booking.id, type: 'QUOTE_REJECTED', quoteId: qb.id } })).toBe(1);
+
+      // the rejected worker cannot edit it any more, and the remaining quote is still choosable
+      await h.api().patch(`/api/v1/workers/me/quotes/${qb.id}`).set(bearer(worker2.accessToken)).send({ priceHalalas: 6000 }).expect(409);
+      await h.api().post(`${base}/${qa.id}/accept`).set(bearer(customer.accessToken)).send({ expectedVersion: 2 }).expect(200);
+      // once the booking moved on, neither action is possible
+      await h.api().post(`${base}/${qa.id}/reject`).set(bearer(customer.accessToken)).expect(409);
+      await h.api().post(`${base}/${qa.id}/request-change`).set(bearer(customer.accessToken)).send({ message: 'Please lower the price' }).expect(409);
+    });
+  });
+
   describe('after acceptance: payment, start and completion', () => {
     it('follows the lifecycle, hides contact details until paid, and enforces who may do what', async () => {
       const customer = await h.makeCustomer();
@@ -344,6 +391,7 @@ run('bookings and quotations (real PostgreSQL, full HTTP stack)', () => {
 
       // PAYMENT_PENDING: the worker may not start, and sees no address or customer contact
       expect((await h.api().post(w('/start')).set(bearer(wk.accessToken)).expect(409)).body.code).toBe('INVALID_STATE');
+      expect((await h.api().post(w('/arrived')).set(bearer(wk.accessToken)).expect(409)).body.code).toBe('INVALID_STATE'); // not paid yet
       const pending = (await h.api().get(w('')).set(bearer(wk.accessToken)).expect(200)).body;
       expect(pending.status).toBe('PAYMENT_PENDING');
       expect(JSON.stringify(pending)).not.toMatch(/Prince Sultan|Villa 7|latitude|customerPhone|customerName/);
@@ -371,6 +419,16 @@ run('bookings and quotations (real PostgreSQL, full HTTP stack)', () => {
       await h.api().post(w('/start')).set(bearer(customer.accessToken)).expect(403);
       await h.api().post(w('/start')).set(bearer(h.adminToken)).expect(403);
       await h.api().post(w('/complete')).set(bearer(wk.accessToken)).expect(409); // not started
+
+      // "I've arrived": only the assigned worker, once paid; saying it again keeps the first time; the status does not change
+      await h.api().post(w('/arrived')).set(bearer(other.accessToken)).expect(404);
+      await h.api().post(w('/arrived')).set(bearer(customer.accessToken)).expect(403);
+      expect(paid.arrivedAt).toBeNull();
+      const arrived = await h.api().post(w('/arrived')).set(bearer(wk.accessToken)).expect(200);
+      expect(arrived.body).toMatchObject({ status: 'CONFIRMED' });
+      expect(arrived.body.arrivedAt).not.toBeNull();
+      const again = await h.api().post(w('/arrived')).set(bearer(wk.accessToken)).expect(200);
+      expect(again.body.arrivedAt).toBe(arrived.body.arrivedAt);
 
       const started = await h.api().post(w('/start')).set(bearer(wk.accessToken)).expect(200);
       expect(started.body.startedAt).not.toBeNull();

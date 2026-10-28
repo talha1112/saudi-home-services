@@ -108,9 +108,18 @@ abstract final class AppRouter {
   static void toRequestDetail(BuildContext context, WorkerRequest request) =>
       _push(context, RequestDetailScreen(request: request), '/request');
 
-  static void toSendQuote(BuildContext context, WorkerRequest request) {
+  /// Sends a first quote, or (with [existing]) changes the live one.
+  static Future<void> toSendQuote(
+    BuildContext context,
+    WorkerRequest request, {
+    WorkerQuote? existing,
+  }) {
     JobsScope.of(context).quotes.clearFailure();
-    _push(context, SendQuoteScreen(request: request), '/send-quote');
+    return _push(
+      context,
+      SendQuoteScreen(request: request, existing: existing),
+      '/send-quote',
+    );
   }
 
   /// A job assigned to this worker.

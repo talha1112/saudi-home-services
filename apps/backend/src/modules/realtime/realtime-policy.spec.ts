@@ -77,7 +77,7 @@ describe('outbox backoff', () => {
 describe('which booking events notify anyone', () => {
   it('notifies only for events whose meaning is established, and never for internal or self-service ones', () => {
     expect([...notifiedBookingEventTypes].sort()).toEqual(
-      ['BOOKING_CANCELLED', 'BOOKING_CREATED', 'BOOKING_EXPIRED', 'PAYMENT_CONFIRMED', 'QUOTE_ACCEPTED', 'QUOTE_REJECTED', 'QUOTE_REVISED', 'QUOTE_SUBMITTED', 'WORK_COMPLETED', 'WORK_STARTED'].sort(),
+      ['BOOKING_CANCELLED', 'BOOKING_CREATED', 'BOOKING_EXPIRED', 'PAYMENT_CONFIRMED', 'QUOTE_ACCEPTED', 'QUOTE_CHANGE_REQUESTED', 'QUOTE_REJECTED', 'QUOTE_REVISED', 'QUOTE_SUBMITTED', 'WORK_COMPLETED', 'WORK_STARTED'].sort(),
     );
     // BOOKING_CREATED tells the eligible workers about a new request (never the customer who made it)
     for (const quiet of ['QUOTE_WITHDRAWN', 'QUOTE_EXPIRED']) expect(notifiedBookingEventTypes).not.toContain(quiet);

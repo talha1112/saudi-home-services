@@ -28,6 +28,10 @@
 	<string>$(MAPS_API_KEY)</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Home Services uses your location only when you choose &quot;use my current location&quot; to place the pin at your home. You can also search for an address instead.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Home Services uses the photos you choose to show the professional what needs fixing.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Home Services uses the camera to take photos of what needs fixing.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

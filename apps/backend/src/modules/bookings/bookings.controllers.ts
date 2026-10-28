@@ -47,6 +47,7 @@ import {
   PhotoUploadDto,
   QuoteForWorkerDto,
   RegisterBookingPhotoDto,
+  RequestQuoteChangeDto,
   UpdateQuoteDto,
   WorkerBookingDto,
   WorkerRequestDetailDto,
@@ -130,6 +131,29 @@ export class CustomerBookingsController {
     @Body() dto: AcceptQuoteDto,
   ) {
     await this.lifecycle.acceptQuote(user.id, id, quoteId, dto.expectedVersion);
+    return this.query.detailForCustomer(user.id, id);
+  }
+
+  @Post(':bookingId/quotes/:quoteId/reject')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reject one quote', description: 'The booking stays open: the other quotes can still be chosen. The worker is told their quote was not chosen.' })
+  @ApiOkResponse({ type: BookingDetailDto })
+  async rejectQuote(@CurrentUser() user: AuthenticatedUser, @Param('bookingId', uuid()) id: string, @Param('quoteId', uuid()) quoteId: string) {
+    await this.lifecycle.rejectQuote(user.id, id, quoteId);
+    return this.query.detailForCustomer(user.id, id);
+  }
+
+  @Post(':bookingId/quotes/:quoteId/request-change')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Ask the worker to change a quote', description: 'The worker is notified and sees the message on the quote until they edit it.' })
+  @ApiOkResponse({ type: BookingDetailDto })
+  async requestQuoteChange(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('bookingId', uuid()) id: string,
+    @Param('quoteId', uuid()) quoteId: string,
+    @Body() dto: RequestQuoteChangeDto,
+  ) {
+    await this.lifecycle.requestQuoteChange(user.id, id, quoteId, dto.message);
     return this.query.detailForCustomer(user.id, id);
   }
 
@@ -249,6 +273,16 @@ export class WorkerBookingsController {
   @ApiOperation({ summary: 'One assigned booking. Full address and customer contact appear once it is paid.' })
   @ApiOkResponse({ type: WorkerBookingDto })
   booking(@CurrentUser() user: AuthenticatedUser, @Param('bookingId', uuid()) id: string) {
+    return this.query.myBookingDetail(user.id, id);
+  }
+
+  @Post('bookings/:bookingId/arrived')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Say you have reached the customer (paid booking, before starting the work)' })
+  @ApiOkResponse({ type: WorkerBookingDto })
+  async arrived(@CurrentUser() user: AuthenticatedUser, @Param('bookingId', uuid()) id: string) {
+    const worker = await this.quotes.workerContext(user.id);
+    await this.lifecycle.markArrived(worker.id, id);
     return this.query.myBookingDetail(user.id, id);
   }
 

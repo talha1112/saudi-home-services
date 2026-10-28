@@ -123,6 +123,15 @@ export class AcceptQuoteDto {
   expectedVersion?: number;
 }
 
+export class RequestQuoteChangeDto {
+  @ApiProperty({ minLength: 3, maxLength: 500, description: 'What the customer would like the worker to change' })
+  @Transform(trim)
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  message: string;
+}
+
 export class RegisterBookingPhotoDto {
   @ApiProperty({ example: 'outlet.jpg' })
   @Transform(trim)
@@ -363,6 +372,7 @@ export class QuoteForCustomerDto {
   @ApiProperty() validUntil: string;
   @ApiProperty({ description: 'True when still SUBMITTED but past validUntil' }) isExpired: boolean;
   @ApiProperty({ type: WorkerPublicSummaryDto }) worker: WorkerPublicSummaryDto;
+  @ApiProperty({ nullable: true, description: 'What the customer asked the worker to change, until the worker edits the quote' }) changeRequest: string | null;
   @ApiProperty() createdAt: string;
 }
 
@@ -426,6 +436,7 @@ export class BookingDetailDto extends BookingSummaryDto {
   @ApiProperty({ enum: ['ONLINE', 'CASH'], nullable: true, description: 'How it is paid once chosen; CASH = the customer pays the worker in person' }) paymentMethod: 'ONLINE' | 'CASH' | null;
   @ApiProperty({ type: [BookingPhotoDto] }) photos: BookingPhotoDto[];
   @ApiProperty({ type: [BookingEventDto] }) timeline: BookingEventDto[];
+  @ApiProperty({ nullable: true, description: 'When the worker said they had arrived' }) arrivedAt: string | null;
   @ApiProperty({ nullable: true }) cancelledAt: string | null;
   @ApiProperty({ enum: CancellationReason, nullable: true }) cancellationReason: CancellationReason | null;
 }
@@ -451,6 +462,7 @@ export class QuoteForWorkerDto {
   @ApiProperty({ nullable: true }) message: string | null;
   @ApiProperty() validUntil: string;
   @ApiProperty() isExpired: boolean;
+  @ApiProperty({ nullable: true, description: 'What the customer asked you to change, until you edit the quote' }) changeRequest: string | null;
   @ApiProperty() createdAt: string;
 }
 
@@ -491,6 +503,7 @@ export class WorkerBookingDto extends WorkerRequestSummaryDto {
   @ApiPropertyOptional({ description: 'Customer phone; shared once the booking is paid' }) customerPhone?: string | null;
   @ApiProperty({ enum: ['ONLINE', 'CASH'], nullable: true, description: 'CASH = collect the total from the customer in person' }) paymentMethod: 'ONLINE' | 'CASH' | null;
   @ApiProperty({ nullable: true, description: 'CASH only: when you confirmed receiving the cash' }) cashCollectedAt: string | null;
+  @ApiProperty({ nullable: true, description: 'When you said you had arrived' }) arrivedAt: string | null;
   @ApiProperty({ nullable: true }) startedAt: string | null;
   @ApiProperty({ nullable: true }) completedAt: string | null;
 }

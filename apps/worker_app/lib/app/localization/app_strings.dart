@@ -257,6 +257,15 @@ const Map<String, Bi> kStrings = {
     'تظهر المنطقة فقط. يظهر عنوان الشارع ورقم العميل بعد أن يدفع العميل.',
   ),
   'wjPhotos': Bi('{n} photo(s) attached', 'صور مرفقة: {n}'),
+  'srcTitle': Bi('Add the file', 'إضافة الملف'),
+  'srcCamera': Bi('Take a photo', 'التقاط صورة'),
+  'srcFile': Bi('Choose from phone', 'اختيار من الهاتف'),
+  'wjPhotoFailed': Bi('Could not load', 'تعذّر التحميل'),
+  'wjChangeAsked': Bi('The customer asked for a change', 'طلب العميل تعديلاً'),
+  'wjChangeHint': Bi(
+    'Edit your quote to answer. They will see the new offer.',
+    'عدّل عرضك للرد. سيرى العميل العرض الجديد.',
+  ),
   'wjRequestGone': Bi(
     'This request is no longer available.',
     'هذا الطلب لم يعد متاحاً.',
@@ -344,6 +353,22 @@ const Map<String, Bi> kStrings = {
     'حدث خطأ ما. حاول مجدداً.',
   ),
   'wjStartJob': Bi('Start job', 'بدء المهمة'),
+  'wjArrived': Bi('I’ve arrived', 'وصلت'),
+  'wjArrivedSaid': Bi(
+    'You marked that you have arrived. Start the job when you begin.',
+    'سجّلت وصولك. ابدأ المهمة عند البدء.',
+  ),
+  'wjEditQuote': Bi('Edit quote', 'تعديل العرض'),
+  'wjSaveQuote': Bi('Save changes', 'حفظ التعديلات'),
+  'wjQuoteSaved': Bi('Quote updated', 'تم تعديل العرض'),
+  'wjWithdrawQuote': Bi('Withdraw', 'سحب العرض'),
+  'wjWithdrawTitle': Bi('Withdraw your quote?', 'سحب عرضك؟'),
+  'wjWithdrawSub': Bi(
+    'The customer will no longer see it. Nothing is charged to you.',
+    'لن يراه العميل بعد الآن. لا توجد رسوم عليك.',
+  ),
+  'wjKeepQuote': Bi('Keep quote', 'الإبقاء'),
+  'wjQuoteWithdrawn': Bi('Quote withdrawn', 'تم سحب العرض'),
   'wjCompleteJob': Bi('Complete job', 'إنهاء المهمة'),
   'wjWaitingPay': Bi('Waiting for the customer to pay', 'بانتظار دفع العميل'),
   'wjWaitingPaySub': Bi(

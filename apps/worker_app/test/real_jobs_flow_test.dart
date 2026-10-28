@@ -414,6 +414,14 @@ void main() {
       );
       expect(find.byKey(const Key('job-status')), findsOneWidget);
       expect(find.text('Confirmed'), findsOneWidget);
+      expect(find.text('Start job'), findsNothing);
+      expect(find.text('I’ve arrived'), findsOneWidget);
+
+      await _tapKey(tester, 'job-action');
+      expect(ctx.api.calls.where((c) => c == 'arrivedWorkerJob'), hasLength(1));
+      expect(ctx.api.calls.where((c) => c == 'startWorkerJob'), isEmpty);
+      expect(ctx.api.workerJobList.single.status, 'CONFIRMED');
+      expect(find.byKey(const Key('arrived-note')), findsOneWidget);
       expect(find.text('Start job'), findsOneWidget);
 
       await _tapKey(tester, 'job-action');
@@ -436,6 +444,7 @@ void main() {
         home: const ActiveJobScreen(jobId: 'job-1', mapsEnabled: false),
         arrange: (api) => api.workerJobList.add(job()),
       );
+      await _tapKey(tester, 'job-action'); // I've arrived
       for (var i = 0; i < 3; i++) {
         await tester.tap(
           find.byKey(const Key('job-action')),
@@ -443,6 +452,7 @@ void main() {
         );
       }
       await _settle(tester);
+      expect(ctx.api.calls.where((c) => c == 'arrivedWorkerJob'), hasLength(1));
       expect(ctx.api.calls.where((c) => c == 'startWorkerJob'), hasLength(1));
     });
 
@@ -457,7 +467,7 @@ void main() {
       ctx.api.jobActionResult = _api(0, 'NETWORK');
       await _tapKey(tester, 'job-action');
       expect(find.text('No connection. Try again.'), findsOneWidget);
-      expect(find.text('Start job'), findsOneWidget);
+      expect(find.text('I’ve arrived'), findsOneWidget);
       expect(ctx.api.workerJobList.single.status, 'CONFIRMED');
     });
   });

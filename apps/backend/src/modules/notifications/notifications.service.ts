@@ -36,6 +36,7 @@ const BOOKING_EVENT_RULES: Record<string, Array<{ to: Target; type: Notification
   QUOTE_REVISED: [{ to: 'customer', type: 'quote.revised' }],
   QUOTE_ACCEPTED: [{ to: 'assigned-worker', type: 'quote.accepted' }],
   QUOTE_REJECTED: [{ to: 'quote-worker', type: 'quote.rejected' }],
+  QUOTE_CHANGE_REQUESTED: [{ to: 'quote-worker', type: 'quote.change_requested' }],
   PAYMENT_CONFIRMED: [
     { to: 'customer', type: 'payment.confirmed' },
     { to: 'assigned-worker', type: 'payment.confirmed' },

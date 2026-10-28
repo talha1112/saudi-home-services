@@ -111,6 +111,7 @@ class WorkerQuote {
     this.estimatedDurationMinutes,
     this.message,
     this.createdAt,
+    this.changeRequest,
   });
 
   factory WorkerQuote.fromJson(Map<String, dynamic> json) => WorkerQuote(
@@ -127,6 +128,7 @@ class WorkerQuote {
     validUntil: _date(json['validUntil']),
     isExpired: json['isExpired'] as bool? ?? false,
     createdAt: _date(json['createdAt']),
+    changeRequest: json['changeRequest'] as String?,
   );
 
   final String id;
@@ -144,6 +146,9 @@ class WorkerQuote {
   final DateTime? validUntil;
   final bool isExpired;
   final DateTime? createdAt;
+
+  /// What the customer asked the worker to change (until the quote is edited), or null.
+  final String? changeRequest;
 
   /// Still open to the customer: submitted and not past its validity.
   bool get isLive => status == 'SUBMITTED' && !isExpired;
@@ -165,23 +170,31 @@ class WorkerRequest {
     this.createdAt,
     this.problemDescription,
     this.photoCount = 0,
+    this.photoIds = const [],
   });
 
-  factory WorkerRequest.fromJson(Map<String, dynamic> json) => WorkerRequest(
-    id: json['id'] as String,
-    reference: json['reference'] as String? ?? '',
-    status: json['status'] as String? ?? '',
-    service: JobService.fromJson(json['service'] as Map<String, dynamic>? ?? const {}),
-    location: BookingLocation.fromJson(json['location'] as Map<String, dynamic>? ?? const {}),
-    isUrgent: json['isUrgent'] as bool? ?? false,
-    preferredStartAt: _date(json['preferredStartAt']),
-    preferredEndAt: _date(json['preferredEndAt']),
-    expiresAt: _date(json['expiresAt']),
-    myQuote: json['myQuote'] is Map<String, dynamic> ? WorkerQuote.fromJson(json['myQuote'] as Map<String, dynamic>) : null,
-    createdAt: _date(json['createdAt']),
-    problemDescription: json['problemDescription'] as String?,
-    photoCount: (json['photos'] as List<dynamic>?)?.length ?? 0,
-  );
+  factory WorkerRequest.fromJson(Map<String, dynamic> json) {
+    final photoIds = [
+      for (final p in (json['photos'] as List<dynamic>? ?? const []))
+        if (p is Map<String, dynamic> && p['id'] is String) p['id'] as String,
+    ];
+    return WorkerRequest(
+      id: json['id'] as String,
+      reference: json['reference'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      service: JobService.fromJson(json['service'] as Map<String, dynamic>? ?? const {}),
+      location: BookingLocation.fromJson(json['location'] as Map<String, dynamic>? ?? const {}),
+      isUrgent: json['isUrgent'] as bool? ?? false,
+      preferredStartAt: _date(json['preferredStartAt']),
+      preferredEndAt: _date(json['preferredEndAt']),
+      expiresAt: _date(json['expiresAt']),
+      myQuote: json['myQuote'] is Map<String, dynamic> ? WorkerQuote.fromJson(json['myQuote'] as Map<String, dynamic>) : null,
+      createdAt: _date(json['createdAt']),
+      problemDescription: json['problemDescription'] as String?,
+      photoCount: (json['photos'] as List<dynamic>?)?.length ?? 0,
+      photoIds: photoIds,
+    );
+  }
 
   final String id;
   final String reference;
@@ -198,8 +211,9 @@ class WorkerRequest {
   final DateTime? createdAt;
   final String? problemDescription;
 
-  /// Photos the customer attached (only their number is carried; viewing them needs a signed download address).
+  /// Photos the customer attached: how many, and their ids (viewing one needs a signed download address, see [HsApi.workerRequestPhotoUrl]).
   final int photoCount;
+  final List<String> photoIds;
 }
 
 /// A booking assigned to this worker (their quote was accepted). Before the customer pays it is PAYMENT_PENDING and the place is the city
@@ -219,11 +233,13 @@ class WorkerJob extends WorkerRequest {
     super.createdAt,
     super.problemDescription,
     super.photoCount,
+    super.photoIds,
     this.money,
     this.customerName,
     this.customerPhone,
     this.paymentMethod,
     this.cashCollectedAt,
+    this.arrivedAt,
     this.startedAt,
     this.completedAt,
   });
@@ -244,11 +260,13 @@ class WorkerJob extends WorkerRequest {
       createdAt: r.createdAt,
       problemDescription: r.problemDescription,
       photoCount: r.photoCount,
+      photoIds: r.photoIds,
       money: json['money'] is Map<String, dynamic> ? WorkerMoney.fromJson(json['money'] as Map<String, dynamic>) : null,
       customerName: json['customerName'] as String?,
       customerPhone: json['customerPhone'] as String?,
       paymentMethod: json['paymentMethod'] as String?,
       cashCollectedAt: _date(json['cashCollectedAt']),
+      arrivedAt: _date(json['arrivedAt']),
       startedAt: _date(json['startedAt']),
       completedAt: _date(json['completedAt']),
     );
@@ -265,6 +283,9 @@ class WorkerJob extends WorkerRequest {
 
   /// CASH only: when the worker confirmed receiving the cash.
   final DateTime? cashCollectedAt;
+
+  /// When the worker said they had reached the customer (a step before starting; not a status).
+  final DateTime? arrivedAt;
   final DateTime? startedAt;
   final DateTime? completedAt;
 
@@ -273,6 +294,9 @@ class WorkerJob extends WorkerRequest {
 
   /// The worker still has to confirm receiving the cash (once the work has started).
   bool get canConfirmCash => isCash && cashCollectedAt == null && (status == 'IN_PROGRESS' || status == 'COMPLETED');
+
+  /// Paid, and the worker has not yet said they arrived.
+  bool get canArrive => status == 'CONFIRMED' && arrivedAt == null;
 
   bool get canStart => status == 'CONFIRMED';
   bool get canComplete => status == 'IN_PROGRESS';

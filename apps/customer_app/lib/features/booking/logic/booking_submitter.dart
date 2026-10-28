@@ -5,6 +5,7 @@ import 'package:hs_client/hs_client.dart';
 
 import '../../location/models/picked_location.dart';
 import 'booking_schedule.dart';
+import 'picked_photo.dart';
 
 /// Everything the customer chose, as the app holds it.
 class BookingDraft {
@@ -118,6 +119,39 @@ class BookingSubmitter extends ChangeNotifier {
     _failure = null;
     _pending = null;
     notifyListeners();
+  }
+
+  /// Attaches the problem photos to the booking that was just created: register -> PUT the bytes -> confirm, one photo at a time, each
+  /// tried twice. A photo that does not go through never undoes the request. Returns how many could not be attached.
+  Future<int> attachPhotos(String bookingId, List<PickedPhoto> photos) async {
+    var failed = 0;
+    for (final photo in photos.take(kMaxBookingPhotos)) {
+      var ok = await _attachOne(bookingId, photo);
+      if (!ok) ok = await _attachOne(bookingId, photo);
+      if (!ok) failed++;
+    }
+    return failed;
+  }
+
+  Future<bool> _attachOne(String bookingId, PickedPhoto photo) async {
+    try {
+      final ticket = await auth.authorized(
+        (t) => api.registerBookingPhoto(
+          t,
+          bookingId,
+          fileName: photo.name,
+          mimeType: photo.mimeType,
+          sizeBytes: photo.bytes.length,
+        ),
+      );
+      await api.putToSignedUrl(ticket.uploadUrl, ticket.headers, photo.bytes);
+      await auth.authorized(
+        (t) => api.confirmBookingPhoto(t, bookingId, ticket.photoId),
+      );
+      return true;
+    } on ApiException {
+      return false;
+    }
   }
 
   /// Returns the created booking, or null with [failure] set.

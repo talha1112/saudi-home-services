@@ -183,7 +183,14 @@ class FakeApi extends HsApi {
   };
 
   Map<String, dynamic> _onboardingJson() => {
-    'profile': {'id': 'wp-1', 'fullName': fullName, 'fullNameAr': fullNameAr, 'bio': bio, 'yearsOfExperience': yearsOfExperience, 'isOnline': workerOnline},
+    'profile': {
+      'id': 'wp-1',
+      'fullName': fullName,
+      'fullNameAr': fullNameAr,
+      'bio': bio,
+      'yearsOfExperience': yearsOfExperience,
+      'isOnline': workerOnline,
+    },
     'services': [
       for (final id in workerServices) {'id': id},
     ],
@@ -655,6 +662,7 @@ class FakeApi extends HsApi {
       createdAt: target.createdAt,
       problemDescription: target.problemDescription,
       photoCount: target.photoCount,
+      photoIds: target.photoIds,
     );
     final late = submitFailAfterCreating;
     if (late != null) {
@@ -662,6 +670,88 @@ class FakeApi extends HsApi {
       throw late;
     }
     return quote;
+  }
+
+  /// An Exception to throw from updateWorkerQuote / withdrawWorkerQuote (every call until cleared), or null.
+  Object? quoteChangeResult;
+  final List<String> withdrawnQuotes = [];
+  final List<(String, SubmitQuoteRequest)> revisedQuotes = [];
+
+  /// Replaces the quote with [change] applied, in the quote list and on the request that carries it.
+  WorkerQuote _changeQuote(String quoteId, WorkerQuote Function(WorkerQuote q) change) {
+    final q = workerQuoteList.indexWhere((x) => x.id == quoteId);
+    if (q < 0) throw _notFound;
+    final next = change(workerQuoteList[q]);
+    workerQuoteList[q] = next;
+    final r = workerRequestList.indexWhere((x) => x.myQuote?.id == quoteId);
+    if (r >= 0) {
+      final t = workerRequestList[r];
+      workerRequestList[r] = WorkerRequest(
+        id: t.id,
+        reference: t.reference,
+        status: t.status,
+        service: t.service,
+        location: t.location,
+        isUrgent: t.isUrgent,
+        preferredStartAt: t.preferredStartAt,
+        preferredEndAt: t.preferredEndAt,
+        expiresAt: t.expiresAt,
+        myQuote: next,
+        createdAt: t.createdAt,
+        problemDescription: t.problemDescription,
+        photoCount: t.photoCount,
+        photoIds: t.photoIds,
+      );
+    }
+    return next;
+  }
+
+  WorkerQuote _quoteWith(WorkerQuote q, {String? status, SubmitQuoteRequest? edit}) {
+    final price = edit?.priceHalalas ?? q.money.serviceHalalas;
+    final vat = (price * 0.15).round();
+    final commission = (price * 0.15).round();
+    return WorkerQuote(
+      id: q.id,
+      bookingId: q.bookingId,
+      bookingReference: q.bookingReference,
+      status: status ?? q.status,
+      version: edit == null ? q.version : q.version + 1,
+      money: WorkerMoney(
+        currency: 'SAR',
+        serviceHalalas: price,
+        vatHalalas: vat,
+        totalHalalas: price + vat,
+        vatRateBps: 1500,
+        commissionHalalas: commission,
+        payoutHalalas: price - commission,
+        commissionRateBps: 1500,
+      ),
+      proposedStartAt: edit?.proposedStartAt ?? q.proposedStartAt,
+      proposedEndAt: edit?.proposedEndAt ?? q.proposedEndAt,
+      estimatedDurationMinutes: q.estimatedDurationMinutes,
+      message: edit?.message ?? q.message,
+      validUntil: edit?.validForHours == null ? q.validUntil : DateTime.now().toUtc().add(Duration(hours: edit!.validForHours!)),
+      isExpired: q.isExpired,
+      createdAt: q.createdAt,
+    );
+  }
+
+  @override
+  Future<WorkerQuote> updateWorkerQuote(String accessToken, String quoteId, SubmitQuoteRequest request) async {
+    calls.add('updateWorkerQuote');
+    revisedQuotes.add((quoteId, request));
+    final r = quoteChangeResult;
+    if (r is Exception) throw r;
+    return _changeQuote(quoteId, (q) => _quoteWith(q, edit: request));
+  }
+
+  @override
+  Future<WorkerQuote> withdrawWorkerQuote(String accessToken, String quoteId) async {
+    calls.add('withdrawWorkerQuote');
+    withdrawnQuotes.add(quoteId);
+    final r = quoteChangeResult;
+    if (r is Exception) throw r;
+    return _changeQuote(quoteId, (q) => _quoteWith(q, status: 'WITHDRAWN'));
   }
 
   @override
@@ -831,16 +921,143 @@ class FakeApi extends HsApi {
       createdAt: j.createdAt,
       problemDescription: j.problemDescription,
       photoCount: j.photoCount,
+      photoIds: j.photoIds,
       money: j.money,
       customerName: j.customerName,
       customerPhone: j.customerPhone,
       paymentMethod: j.paymentMethod,
       cashCollectedAt: j.cashCollectedAt,
+      arrivedAt: j.arrivedAt,
       startedAt: to == 'IN_PROGRESS' ? DateTime.now().toUtc() : j.startedAt,
       completedAt: to == 'COMPLETED' ? DateTime.now().toUtc() : j.completedAt,
     );
     workerJobList[index] = moved;
     return moved;
+  }
+
+  // ---- reject / ask for a change / cancel (customer)
+
+  Object? quoteActionResult;
+  final List<(String, String)> rejectedQuotes = []; // bookingId, quoteId
+  final List<(String, String, String)> changeRequests = []; // bookingId, quoteId, message
+  final List<(String, String, String?)> cancelledBookings = []; // bookingId, reason, note
+
+  @override
+  Future<BookingDetail> rejectQuote(String accessToken, String bookingId, String quoteId) async {
+    calls.add('rejectQuote');
+    rejectedQuotes.add((bookingId, quoteId));
+    final r = quoteActionResult;
+    if (r is Exception) throw r;
+    final detail = detailStore[bookingId] ?? (throw _notFound);
+    final i = customerQuoteList.indexWhere((q) => q.id == quoteId && q.bookingId == bookingId);
+    if (i < 0) throw _notFound;
+    customerQuoteList[i] = _customerQuoteWith(customerQuoteList[i], status: 'REJECTED');
+    return detail;
+  }
+
+  @override
+  Future<BookingDetail> requestQuoteChange(String accessToken, String bookingId, String quoteId, String message) async {
+    calls.add('requestQuoteChange');
+    changeRequests.add((bookingId, quoteId, message));
+    final r = quoteActionResult;
+    if (r is Exception) throw r;
+    final detail = detailStore[bookingId] ?? (throw _notFound);
+    final i = customerQuoteList.indexWhere((q) => q.id == quoteId && q.bookingId == bookingId);
+    if (i < 0) throw _notFound;
+    customerQuoteList[i] = _customerQuoteWith(customerQuoteList[i], changeRequest: message);
+    return detail;
+  }
+
+  CustomerQuote _customerQuoteWith(CustomerQuote q, {String? status, String? changeRequest}) => CustomerQuote(
+    id: q.id,
+    bookingId: q.bookingId,
+    status: status ?? q.status,
+    version: q.version,
+    money: q.money,
+    worker: q.worker,
+    isExpired: q.isExpired,
+    proposedStartAt: q.proposedStartAt,
+    proposedEndAt: q.proposedEndAt,
+    estimatedDurationMinutes: q.estimatedDurationMinutes,
+    message: q.message,
+    validUntil: q.validUntil,
+    changeRequest: changeRequest ?? q.changeRequest,
+  );
+
+  @override
+  Future<BookingDetail> cancelBooking(String accessToken, String bookingId, {required String reason, String? note}) async {
+    calls.add('cancelBooking');
+    cancelledBookings.add((bookingId, reason, note));
+    final r = quoteActionResult;
+    if (r is Exception) throw r;
+    final d = detailStore[bookingId] ?? (throw _notFound);
+    if (!const {'OPEN', 'PAYMENT_PENDING', 'CONFIRMED'}.contains(d.status)) {
+      throw ApiException(status: 409, code: 'INVALID_STATE', message: 'A ${d.status.toLowerCase()} booking cannot be cancelled');
+    }
+    final cancelled = BookingDetail(
+      id: d.id,
+      reference: d.reference,
+      status: 'CANCELLED',
+      serviceNameEn: d.serviceNameEn,
+      serviceNameAr: d.serviceNameAr,
+      location: d.location,
+      isUrgent: d.isUrgent,
+      problemDescription: d.problemDescription,
+      preferredStartAt: d.preferredStartAt,
+      preferredEndAt: d.preferredEndAt,
+      expiresAt: d.expiresAt,
+      money: d.money,
+      worker: d.worker,
+      acceptedQuoteId: d.acceptedQuoteId,
+      paymentMethod: d.paymentMethod,
+      arrivedAt: d.arrivedAt,
+      timeline: d.timeline,
+    );
+    detailStore[bookingId] = cancelled;
+    return cancelled;
+  }
+
+  // ---- problem photos
+
+  /// Photos registered, as (bookingId, fileName, mimeType, sizeBytes), and the ones confirmed.
+  final List<(String, String, String, int)> registeredPhotos = [];
+  final List<(String, String)> confirmedPhotos = []; // bookingId, photoId
+  final List<int> photoUploadSizes = [];
+  Object? photoResult;
+  int _photoSeq = 0;
+
+  @override
+  Future<PhotoUploadTicket> registerBookingPhoto(String accessToken, String bookingId, {required String fileName, required String mimeType, required int sizeBytes}) async {
+    calls.add('registerBookingPhoto');
+    final r = photoResult;
+    if (r is Exception) throw r;
+    registeredPhotos.add((bookingId, fileName, mimeType, sizeBytes));
+    return PhotoUploadTicket(photoId: 'photo-${++_photoSeq}', uploadUrl: 'https://storage.example.invalid/photo?sig=secret', headers: {'Content-Type': mimeType});
+  }
+
+  @override
+  Future<void> putToSignedUrl(String uploadUrl, Map<String, String> headers, Uint8List bytes) async {
+    calls.add('putToSignedUrl');
+    _maybeFail('putToSignedUrl');
+    photoUploadSizes.add(bytes.length);
+  }
+
+  @override
+  Future<void> confirmBookingPhoto(String accessToken, String bookingId, String photoId) async {
+    calls.add('confirmBookingPhoto');
+    confirmedPhotos.add((bookingId, photoId));
+  }
+
+  Object? photoUrlsResult;
+  final List<(String, String)> photoUrlRequests = [];
+
+  @override
+  Future<String?> workerRequestPhotoUrl(String accessToken, String bookingId, String photoId) async {
+    calls.add('workerRequestPhotoUrl');
+    photoUrlRequests.add((bookingId, photoId));
+    final r = photoUrlsResult;
+    if (r is Exception) throw r;
+    return r is String ? r : 'https://storage.example.invalid/view/$photoId';
   }
 
   Object? cashResult;
@@ -912,11 +1129,53 @@ class FakeApi extends HsApi {
       createdAt: j.createdAt,
       problemDescription: j.problemDescription,
       photoCount: j.photoCount,
+      photoIds: j.photoIds,
       money: j.money,
       customerName: j.customerName,
       customerPhone: j.customerPhone,
       paymentMethod: j.paymentMethod,
       cashCollectedAt: DateTime.now().toUtc(),
+      arrivedAt: j.arrivedAt,
+      startedAt: j.startedAt,
+      completedAt: j.completedAt,
+    );
+    workerJobList[index] = moved;
+    return moved;
+  }
+
+  @override
+  Future<WorkerJob> arrivedWorkerJob(String accessToken, String bookingId) async {
+    calls.add('arrivedWorkerJob');
+    final r = jobActionResult;
+    if (r is Exception) throw r;
+    final index = workerJobList.indexWhere((x) => x.id == bookingId);
+    if (index < 0) throw _notFound;
+    final j = workerJobList[index];
+    if (j.arrivedAt != null) return j;
+    if (j.status != 'CONFIRMED') {
+      throw ApiException(status: 409, code: 'INVALID_STATE', message: 'A ${j.status.toLowerCase()} booking cannot do this');
+    }
+    final moved = WorkerJob(
+      id: j.id,
+      reference: j.reference,
+      status: j.status,
+      service: j.service,
+      location: j.location,
+      isUrgent: j.isUrgent,
+      preferredStartAt: j.preferredStartAt,
+      preferredEndAt: j.preferredEndAt,
+      expiresAt: j.expiresAt,
+      myQuote: j.myQuote,
+      createdAt: j.createdAt,
+      problemDescription: j.problemDescription,
+      photoCount: j.photoCount,
+      photoIds: j.photoIds,
+      money: j.money,
+      customerName: j.customerName,
+      customerPhone: j.customerPhone,
+      paymentMethod: j.paymentMethod,
+      cashCollectedAt: j.cashCollectedAt,
+      arrivedAt: DateTime.now().toUtc(),
       startedAt: j.startedAt,
       completedAt: j.completedAt,
     );

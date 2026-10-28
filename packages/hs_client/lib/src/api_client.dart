@@ -145,14 +145,17 @@ class HsApi {
 
   /// Step 2: sends the bytes to the signed address the backend handed out. No Authorization header is sent there, redirects are not followed,
   /// and neither the address nor the bytes appear in any error.
-  Future<void> uploadToSignedUrl(DocumentUploadTicket ticket, Uint8List bytes) async {
-    final uri = Uri.tryParse(ticket.uploadUrl);
+  Future<void> uploadToSignedUrl(DocumentUploadTicket ticket, Uint8List bytes) => putToSignedUrl(ticket.uploadUrl, ticket.headers, bytes);
+
+  /// The same signed PUT for any ticket (a document, a problem photo).
+  Future<void> putToSignedUrl(String uploadUrl, Map<String, String> headers, Uint8List bytes) async {
+    final uri = Uri.tryParse(uploadUrl);
     final allowed = uri != null && uri.host.isNotEmpty && (uri.scheme == 'https' || (allowCleartextUploads && uri.scheme == 'http'));
     if (!allowed) throw const ApiException(status: 0, code: 'UPLOAD_URL_REJECTED');
     final request = http.Request('PUT', uri)
       ..followRedirects = false
       ..bodyBytes = bytes;
-    ticket.headers.forEach((k, v) {
+    headers.forEach((k, v) {
       if (k.toLowerCase() != 'authorization') request.headers[k] = v;
     });
     http.Response response;
@@ -292,6 +295,67 @@ class HsApi {
     ),
   );
 
+  /// Turns one quote down. The booking stays open for the other quotes.
+  Future<BookingDetail> rejectQuote(String accessToken, String bookingId, String quoteId) async => BookingDetail.fromJson(
+    await _json(
+      'POST',
+      '/bookings/${Uri.encodeComponent(bookingId)}/quotes/${Uri.encodeComponent(quoteId)}/reject',
+      accessToken: accessToken,
+      body: const {},
+    ),
+  );
+
+  /// Asks the worker to change their quote; they are notified and see [message] until they edit it.
+  Future<BookingDetail> requestQuoteChange(String accessToken, String bookingId, String quoteId, String message) async => BookingDetail.fromJson(
+    await _json(
+      'POST',
+      '/bookings/${Uri.encodeComponent(bookingId)}/quotes/${Uri.encodeComponent(quoteId)}/request-change',
+      accessToken: accessToken,
+      body: {'message': message},
+    ),
+  );
+
+  /// Cancels the customer's booking (allowed until the work has started). [reason] is one of the backend's CancellationReason values.
+  Future<BookingDetail> cancelBooking(String accessToken, String bookingId, {required String reason, String? note}) async => BookingDetail.fromJson(
+    await _json('POST', '/bookings/${Uri.encodeComponent(bookingId)}/cancel', accessToken: accessToken, body: {'reason': reason, 'note': ?note}),
+  );
+
+  /// Step 1 of attaching a problem photo to a booking: registers it and returns where to PUT the bytes (503 while no storage is set up).
+  Future<PhotoUploadTicket> registerBookingPhoto(
+    String accessToken,
+    String bookingId, {
+    required String fileName,
+    required String mimeType,
+    required int sizeBytes,
+  }) async => PhotoUploadTicket.fromJson(
+    await _json(
+      'POST',
+      '/bookings/${Uri.encodeComponent(bookingId)}/photos',
+      accessToken: accessToken,
+      body: {'fileName': fileName, 'mimeType': mimeType, 'sizeBytes': sizeBytes},
+    ),
+  );
+
+  /// Step 3: tells the backend the bytes are stored; it checks them itself.
+  Future<void> confirmBookingPhoto(String accessToken, String bookingId, String photoId) async {
+    await _json(
+      'POST',
+      '/bookings/${Uri.encodeComponent(bookingId)}/photos/${Uri.encodeComponent(photoId)}/confirm',
+      accessToken: accessToken,
+      body: const {},
+    );
+  }
+
+  /// A short-lived link to one photo of a request the worker may see (or the job they were assigned).
+  Future<String?> workerRequestPhotoUrl(String accessToken, String bookingId, String photoId) async {
+    final r = await _json(
+      'GET',
+      '/workers/me/requests/${Uri.encodeComponent(bookingId)}/photos/${Uri.encodeComponent(photoId)}/download-url',
+      accessToken: accessToken,
+    );
+    return r['url'] as String?;
+  }
+
   /// Starts paying for a PAYMENT_PENDING booking. The amount is the agreed total and cannot be sent. The same [idempotencyKey] returns the
   /// same attempt, so a retry never starts a second payment. 503 PAYMENT_PROVIDER_NOT_CONFIGURED while no provider is set up.
   Future<PaymentAttempt> startPayment(String accessToken, String bookingId, {required String idempotencyKey}) async => PaymentAttempt.fromJson(
@@ -346,6 +410,11 @@ class HsApi {
     );
   }
 
+  /// Changes a live quote (re-priced by the server at the pricing in force now).
+  Future<WorkerQuote> updateWorkerQuote(String accessToken, String quoteId, SubmitQuoteRequest request) async => WorkerQuote.fromJson(
+    await _json('PATCH', '/workers/me/quotes/${Uri.encodeComponent(quoteId)}', accessToken: accessToken, body: request.toJson()),
+  );
+
   Future<WorkerQuote> withdrawWorkerQuote(String accessToken, String quoteId) async => WorkerQuote.fromJson(
     await _json('POST', '/workers/me/quotes/${Uri.encodeComponent(quoteId)}/withdraw', accessToken: accessToken, body: const {}),
   );
@@ -367,6 +436,11 @@ class HsApi {
   /// One assigned booking. Another worker's booking is a 404.
   Future<WorkerJob> workerJob(String accessToken, String bookingId) async =>
       WorkerJob.fromJson(await _json('GET', '/workers/me/bookings/${Uri.encodeComponent(bookingId)}', accessToken: accessToken));
+
+  /// The worker says they have reached the customer (paid booking, before starting). Saying it again changes nothing.
+  Future<WorkerJob> arrivedWorkerJob(String accessToken, String bookingId) async => WorkerJob.fromJson(
+    await _json('POST', '/workers/me/bookings/${Uri.encodeComponent(bookingId)}/arrived', accessToken: accessToken, body: const {}),
+  );
 
   /// CONFIRMED -> IN_PROGRESS. The backend refuses it unless the booking is this worker's and has been paid.
   Future<WorkerJob> startWorkerJob(String accessToken, String bookingId) async => WorkerJob.fromJson(

@@ -61,6 +61,7 @@ class BookingDetailController extends ChangeNotifier {
   ApiException? _error;
   Future<void>? _loading;
   Future<bool>? _accepting;
+  Future<bool>? _acting;
   Future<PaymentAttempt?>? _paying;
   Future<bool>? _cashing;
   String? _payKey;
@@ -92,6 +93,9 @@ class BookingDetailController extends ChangeNotifier {
   ActionFailure? get failure => _failure;
   ApiException? get error => _error;
   bool get accepting => _accepting != null;
+
+  /// A reject, change request or cancellation is running.
+  bool get acting => _acting != null;
   bool get paying => _paying != null;
   bool get cashing => _cashing != null;
 
@@ -213,6 +217,40 @@ class BookingDetailController extends ChangeNotifier {
     }
   }
 
+  /// Turns [quote] down; the booking stays open. Returns true when the server did it.
+  Future<bool> reject(CustomerQuote quote) =>
+      _act((t) => api.rejectQuote(t, bookingId, quote.id));
+
+  /// Asks the worker behind [quote] to change it. Returns true when the server took the request.
+  Future<bool> requestChange(CustomerQuote quote, String message) => _act(
+    (t) => api.requestQuoteChange(t, bookingId, quote.id, message.trim()),
+  );
+
+  /// Cancels the booking (the server allows it until the work has started). [reason] is a backend cancellation reason.
+  Future<bool> cancel(String reason) =>
+      _act((t) => api.cancelBooking(t, bookingId, reason: reason));
+
+  Future<bool> _act(Future<BookingDetail> Function(String token) call) =>
+      _acting ??= _run(call).whenComplete(() {
+        _acting = null;
+        notifyListeners();
+      });
+
+  Future<bool> _run(Future<BookingDetail> Function(String token) call) async {
+    _failure = null;
+    notifyListeners();
+    try {
+      _detail = await auth.authorized(call);
+      await load(); // the quotes and the status as the server has them now
+      return true;
+    } on ApiException catch (e) {
+      _failure = _classify(e);
+      // the truth may have changed meanwhile (the quote was withdrawn, the booking moved on): show it
+      if (e.status == 409 || e.status == 404) unawaited(load());
+      return false;
+    }
+  }
+
   /// Pays in cash: the booking is confirmed at once and the customer pays the agreed total to the worker in person. Taps while it runs share
   /// one request, and the server treats a repeat as already done. Returns true when the server reports the booking as confirmed.
   Future<bool> payCash() => _cashing ??= _payCash().whenComplete(() {
@@ -310,6 +348,8 @@ class BookingDetailController extends ChangeNotifier {
         return const ActionFailure(ActionProblem.paymentInProgress);
       case 'BOOKING_NOT_OPEN':
       case 'QUOTE_NOT_ACCEPTABLE':
+      case 'QUOTE_NOT_AVAILABLE':
+      case 'INVALID_STATE':
       case 'QUOTE_EXPIRED':
         return const ActionFailure(ActionProblem.notAvailable);
     }

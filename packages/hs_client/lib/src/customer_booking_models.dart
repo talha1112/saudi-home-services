@@ -89,6 +89,7 @@ class CustomerQuote {
     this.estimatedDurationMinutes,
     this.message,
     this.validUntil,
+    this.changeRequest,
   });
 
   factory CustomerQuote.fromJson(Map<String, dynamic> json) => CustomerQuote(
@@ -104,6 +105,7 @@ class CustomerQuote {
     estimatedDurationMinutes: (json['estimatedDurationMinutes'] as num?)?.toInt(),
     message: json['message'] as String?,
     validUntil: _date(json['validUntil']),
+    changeRequest: json['changeRequest'] as String?,
   );
 
   final String id;
@@ -120,6 +122,9 @@ class CustomerQuote {
   final int? estimatedDurationMinutes;
   final String? message;
   final DateTime? validUntil;
+
+  /// What the customer asked this worker to change, until the worker edits the quote.
+  final String? changeRequest;
 
   bool get canAccept => status == 'SUBMITTED' && !isExpired;
 }
@@ -167,6 +172,8 @@ class BookingDetail {
     this.paymentDueAt,
     this.paymentMethod,
     this.quoteCount = 0,
+    this.arrivedAt,
+    this.timeline = const [],
   });
 
   factory BookingDetail.fromJson(Map<String, dynamic> json) {
@@ -189,6 +196,8 @@ class BookingDetail {
       paymentDueAt: _date(json['paymentDueAt']),
       paymentMethod: json['paymentMethod'] as String?,
       quoteCount: _int(json['quoteCount']),
+      arrivedAt: _date(json['arrivedAt']),
+      timeline: [for (final e in (json['timeline'] as List<dynamic>? ?? const [])) BookingEvent.fromJson(e as Map<String, dynamic>)],
     );
   }
 
@@ -216,9 +225,48 @@ class BookingDetail {
   final String? paymentMethod;
   final int quoteCount;
 
+  /// When the worker said they had arrived (a paid booking, before the work starts).
+  final DateTime? arrivedAt;
+
+  /// What happened to the booking and when, oldest first.
+  final List<BookingEvent> timeline;
+
+  /// The time of the first event of [type] (for example WORK_STARTED), or null.
+  DateTime? when(String type) {
+    for (final e in timeline) {
+      if (e.type == type) return e.createdAt;
+    }
+    return null;
+  }
+
   bool get isCash => paymentMethod == 'CASH';
 
   String serviceName({required bool arabic}) => arabic && serviceNameAr.isNotEmpty ? serviceNameAr : serviceNameEn;
+}
+
+/// One entry of a booking's history (`BookingEventDto`): QUOTE_ACCEPTED, PAYMENT_CONFIRMED, WORK_STARTED ...
+class BookingEvent {
+  const BookingEvent({required this.type, this.createdAt});
+
+  factory BookingEvent.fromJson(Map<String, dynamic> json) => BookingEvent(type: json['type'] as String? ?? '', createdAt: _date(json['createdAt']));
+
+  final String type;
+  final DateTime? createdAt;
+}
+
+/// Where to PUT one problem photo (`PhotoUploadDto`). The address is a short-lived secret: never log it.
+class PhotoUploadTicket {
+  const PhotoUploadTicket({required this.photoId, required this.uploadUrl, required this.headers});
+
+  factory PhotoUploadTicket.fromJson(Map<String, dynamic> json) => PhotoUploadTicket(
+    photoId: (json['photo'] as Map<String, dynamic>? ?? const {})['id'] as String? ?? '',
+    uploadUrl: json['uploadUrl'] as String? ?? '',
+    headers: {for (final e in (json['headers'] as Map<String, dynamic>? ?? const {}).entries) e.key: '${e.value}'},
+  );
+
+  final String photoId;
+  final String uploadUrl;
+  final Map<String, String> headers;
 }
 
 /// One attempt to pay (`PaymentAttemptDto`). The booking only becomes CONFIRMED when the server has a verified provider event: this object

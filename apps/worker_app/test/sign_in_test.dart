@@ -84,6 +84,30 @@ void main() {
     },
   );
 
+  testWidgets(
+    'reopening the app with a saved session goes straight to the dashboard: no language question, no phone sign-in',
+    (tester) async {
+      tester.view.physicalSize = const Size(390 * 3, 844 * 3);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      final kit = TestHsClient(
+        kind: AppKind.worker,
+        user: fakeUser(role: 'WORKER', workerStatus: 'APPROVED'),
+      );
+      addTearDown(kit.client.auth.dispose);
+      await kit.client.auth.sendCode('+966551234567');
+      await kit.client.auth.submitCode(
+        '123456',
+      ); // the session a previous launch saved
+      await tester.pumpWidget(App(client: kit.client));
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(find.text('Choose your preferred language'), findsNothing);
+      expect(find.byType(MainShell), findsOneWidget);
+      expect(find.byType(WelcomeScreen), findsNothing);
+    },
+  );
+
   testWidgets('an approved worker goes straight to the dashboard', (
     tester,
   ) async {

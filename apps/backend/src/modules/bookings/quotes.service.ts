@@ -195,6 +195,8 @@ export class QuotesService {
           estimatedDurationMinutes: dto.estimatedDurationMinutes ?? quote.estimatedDurationMinutes,
           message: dto.message ?? quote.message,
           validUntil: offer.validUntil,
+          changeRequest: null,
+          changeRequestedAt: null,
           version: { increment: 1 },
         },
       });

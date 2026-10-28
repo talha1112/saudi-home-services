@@ -188,6 +188,12 @@ class _RealProfileState extends State<RealProfile> {
 
     final rows = <(String, String, String, VoidCallback?)>[
       (
+        'tag',
+        context.tr('subscription'),
+        context.l(app.plan.name),
+        () => AppRouter.toSubscription(context),
+      ),
+      (
         'file',
         context.tr('profDocuments'),
         docs.isEmpty ? '' : Ob.stateBadge(state, ar),

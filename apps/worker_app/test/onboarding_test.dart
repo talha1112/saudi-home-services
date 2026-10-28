@@ -19,6 +19,12 @@ class _FakePicker implements DocumentPicker {
   bool? lastImagesOnly;
 
   @override
+  bool get hasCamera => false;
+
+  @override
+  Future<PickedDocument?> takePhoto() async => null;
+
+  @override
   Future<PickedDocument?> pick({bool imagesOnly = false}) async {
     lastImagesOnly = imagesOnly;
     picks++;

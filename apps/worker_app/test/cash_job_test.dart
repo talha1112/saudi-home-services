@@ -123,7 +123,9 @@ void main() {
           reason: 'not before the work has started',
         );
 
-        await tester.tap(find.byKey(const Key('job-action')));
+        await tester.tap(find.byKey(const Key('job-action'))); // I've arrived
+        await _settle(tester);
+        await tester.tap(find.byKey(const Key('job-action'))); // Start job
         await _settle(tester);
         expect(find.byKey(const Key('cash-collected')), findsOneWidget);
 

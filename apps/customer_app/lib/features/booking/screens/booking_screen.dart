@@ -43,6 +43,7 @@ class _BookingScreenState extends State<BookingScreen> {
   late int _step = widget.initialStep;
   bool _changeOpen = false;
   bool _changeSent = false;
+  bool _uploading = false;
 
   int get _total => kDemoData ? 5 : 3;
   static const _lastRealStep = 3;
@@ -65,7 +66,16 @@ class _BookingScreenState extends State<BookingScreen> {
     final booking = await submitter.submit(app.draft);
     if (!mounted) return;
     if (booking != null) {
-      AppRouter.toBookingSent(context, booking);
+      var failed = 0;
+      final photos = List.of(app.photos);
+      if (photos.isNotEmpty) {
+        setState(() => _uploading = true);
+        failed = await submitter.attachPhotos(booking.id, photos);
+        if (!mounted) return;
+        app.update(app.photos.clear);
+      }
+      if (!mounted) return;
+      AppRouter.toBookingSent(context, booking, photosFailed: failed);
       return;
     }
     // Something the customer still has to choose: take them to that step.
@@ -101,9 +111,9 @@ class _BookingScreenState extends State<BookingScreen> {
     };
 
     return PopScope(
-      canPop: _step == 1 && !submitter.busy,
+      canPop: _step == 1 && !submitter.busy && !_uploading,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && !submitter.busy) _back();
+        if (!didPop && !submitter.busy && !_uploading) _back();
       },
       child: Scaffold(
         body: SafeArea(
@@ -205,7 +215,7 @@ class _BookingScreenState extends State<BookingScreen> {
                       final sending =
                           _step == _lastRealStep &&
                           !kDemoData &&
-                          submitter.busy;
+                          (submitter.busy || _uploading);
                       return AppButton(
                         key: const Key('booking-cta'),
                         label: context.tr(sending ? 'sendingRequest' : ctaKey),

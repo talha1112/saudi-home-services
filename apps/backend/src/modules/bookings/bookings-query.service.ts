@@ -109,6 +109,7 @@ export function toQuoteForWorker(q: QuoteRow & { booking: { reference: string } 
     message: q.message,
     validUntil: q.validUntil.toISOString(),
     isExpired: q.status === QuoteStatus.SUBMITTED && q.validUntil.getTime() <= now.getTime(),
+    changeRequest: q.changeRequest,
     createdAt: q.createdAt.toISOString(),
   };
 }
@@ -238,6 +239,7 @@ export class BookingsQueryService {
         validUntil: r.validUntil.toISOString(),
         isExpired: r.status === QuoteStatus.SUBMITTED && r.validUntil.getTime() <= now.getTime(),
         worker: summary,
+        changeRequest: r.changeRequest,
         createdAt: r.createdAt.toISOString(),
       };
     });
@@ -482,6 +484,7 @@ export class BookingsQueryService {
       paymentMethod: toMethod(b.paymentMethod),
       photos: b.photos.map(photoDto),
       timeline: b.events.map(eventDto),
+      arrivedAt: b.arrivedAt?.toISOString() ?? null,
       cancelledAt: b.cancelledAt?.toISOString() ?? null,
       cancellationReason: b.cancellation?.reason ?? null,
     };
@@ -541,6 +544,7 @@ export class BookingsQueryService {
       ...(paid ? { customerName: b.customer.fullName, customerPhone: b.customer.phone } : {}),
       paymentMethod: toMethod(b.paymentMethod),
       cashCollectedAt: b.cashCollectedAt?.toISOString() ?? null,
+      arrivedAt: b.arrivedAt?.toISOString() ?? null,
       startedAt: b.startedAt?.toISOString() ?? null,
       completedAt: b.completedAt?.toISOString() ?? null,
     };

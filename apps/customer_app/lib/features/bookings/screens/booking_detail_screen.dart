@@ -15,8 +15,11 @@ import '../../../shared/widgets/app_button.dart';
 import '../../../shared/widgets/tiles.dart';
 import '../../booking/logic/booking_schedule.dart';
 import '../logic/booking_detail_controller.dart';
+import '../logic/worker_position_controller.dart';
+import '../widgets/cancel_booking_sheet.dart';
 import '../widgets/live_worker_map.dart';
 import '../widgets/review_card.dart';
+import '../widgets/tracking_status.dart';
 
 /// One of the customer's bookings, from the backend: while it is open the quotes workers sent (choose one), then paying the agreed total,
 /// then the confirmed booking. Every amount, state and contact on this screen is what the server returned.
@@ -92,6 +95,55 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     );
     if (ok != true || !mounted) return;
     if (await c.accept(quote)) _listChanged();
+  }
+
+  Future<void> _reject(CustomerQuote quote) async {
+    final c = _c!;
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        key: const Key('reject-dialog'),
+        title: Text(ctx.tr('bdRejectTitle')),
+        content: Text(ctx.tr('bdRejectBody')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(ctx.tr('bdNotNow')),
+          ),
+          TextButton(
+            key: const Key('reject-confirm'),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(ctx.tr('bdRejectConfirm')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final done = await c.reject(quote);
+    if (!mounted) return;
+    if (done) {
+      messenger.showSnackBar(SnackBar(content: Text(context.tr('bdRejected'))));
+      _listChanged();
+    }
+  }
+
+  Future<void> _requestChange(CustomerQuote quote) async {
+    final c = _c!;
+    final message = await showDialog<String>(
+      context: context,
+      builder: (_) => const _ChangeRequestDialog(),
+    );
+    if (message == null || !mounted) return;
+    await c.requestChange(quote, message);
+  }
+
+  Future<void> _cancel() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final done = await showCancelBookingSheet(context, _c!);
+    if (!done || !mounted) return;
+    messenger.showSnackBar(SnackBar(content: Text(context.tr('bdCancelDone'))));
+    _listChanged();
   }
 
   Future<void> _payCash() async {
@@ -273,8 +325,8 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           if (d.status == 'OPEN') ..._quotesSection(context, c),
           if (d.status == 'PAYMENT_PENDING') ..._paymentSection(context, c, d),
           if (d.status == 'CONFIRMED' || d.status == 'IN_PROGRESS') ...[
-            LiveWorkerMap(
-              bookingId: d.id,
+            _TrackingSection(
+              detail: d,
               destination: d.location.hasExactPoint
                   ? LatLng(d.location.latitude!, d.location.longitude!)
                   : null,
@@ -285,6 +337,23 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           ],
           if (c.isPaid) ..._paidSection(context, d),
           if (d.status == 'COMPLETED') ReviewCard(controller: c),
+          if (const {
+            'OPEN',
+            'PAYMENT_PENDING',
+            'CONFIRMED',
+          }.contains(d.status)) ...[
+            const SizedBox(height: 4),
+            AppButton(
+              key: const Key('cancel-booking'),
+              label: context.tr('cancelBooking'),
+              kind: AppButtonKind.outline,
+              height: 48,
+              radius: 15,
+              fontSize: 14,
+              enabled: !c.acting && !c.accepting && !c.cashing,
+              onPressed: _cancel,
+            ),
+          ],
         ],
       ),
     );
@@ -342,14 +411,57 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
                 Text(q.message!, style: ts(13, c: AppColors.slate, h: 1.45)),
               ],
               const SizedBox(height: 12),
+              if (q.changeRequest != null && q.changeRequest!.isNotEmpty) ...[
+                InfoNote(
+                  context
+                      .tr('bdChangeSent')
+                      .replaceAll('{m}', q.changeRequest!),
+                  key: Key('change-sent-${q.id}'),
+                  icon: 'clock',
+                  bg: AppColors.cream,
+                  fg: AppColors.creamDeep,
+                  iconColor: AppColors.creamDeep,
+                ),
+                const SizedBox(height: 10),
+              ],
               AppButton(
                 key: Key('accept-${q.id}'),
                 label: context.tr('bdChoose'),
                 height: 46,
                 radius: 14,
                 fontSize: 14.5,
-                enabled: !c.accepting,
+                enabled: !c.accepting && !c.acting,
                 onPressed: () => _choose(q),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: AppButton(
+                      key: Key('change-${q.id}'),
+                      label: context.tr('bdChange'),
+                      kind: AppButtonKind.soft,
+                      height: 44,
+                      radius: 14,
+                      fontSize: 13.5,
+                      enabled: !c.accepting && !c.acting,
+                      onPressed: () => _requestChange(q),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: AppButton(
+                      key: Key('reject-${q.id}'),
+                      label: context.tr('bdReject'),
+                      kind: AppButtonKind.outline,
+                      height: 44,
+                      radius: 14,
+                      fontSize: 13.5,
+                      enabled: !c.accepting && !c.acting,
+                      onPressed: () => _reject(q),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -664,6 +776,131 @@ class _MethodTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The live map and, under it, the booking's status with the ETA and its timeline. One position source feeds both.
+class _TrackingSection extends StatefulWidget {
+  const _TrackingSection({
+    required this.detail,
+    required this.destination,
+    required this.mapBuilder,
+    required this.mapsEnabled,
+  });
+
+  final BookingDetail detail;
+  final LatLng? destination;
+  final LiveMapBuilder mapBuilder;
+  final bool? mapsEnabled;
+
+  @override
+  State<_TrackingSection> createState() => _TrackingSectionState();
+}
+
+class _TrackingSectionState extends State<_TrackingSection> {
+  WorkerPositionController? _position;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _position ??= BookingScope.of(
+      context,
+    ).positionFor(widget.detail.id, const Duration(seconds: 5))..start();
+  }
+
+  @override
+  void dispose() {
+    _position?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final position = _position!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        LiveWorkerMap(
+          bookingId: widget.detail.id,
+          controller: position,
+          destination: widget.destination,
+          mapBuilder: widget.mapBuilder,
+          mapsEnabled: widget.mapsEnabled,
+        ),
+        const SizedBox(height: 18),
+        TrackingStatus(
+          detail: widget.detail,
+          position: position,
+          destination: widget.destination,
+        ),
+      ],
+    );
+  }
+}
+
+/// Asks what the customer wants the professional to change. Pops with the text, or nothing when dismissed.
+class _ChangeRequestDialog extends StatefulWidget {
+  const _ChangeRequestDialog();
+
+  @override
+  State<_ChangeRequestDialog> createState() => _ChangeRequestDialogState();
+}
+
+class _ChangeRequestDialogState extends State<_ChangeRequestDialog> {
+  final _text = TextEditingController();
+  bool _short = false;
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      key: const Key('change-dialog'),
+      title: Text(context.tr('bdChangeTitle')),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            context.tr('bdChangeBody'),
+            style: ts(13, c: AppColors.slate, h: 1.45),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('change-input'),
+            controller: _text,
+            maxLength: 500,
+            maxLines: 3,
+            decoration: InputDecoration(
+              hintText: context.tr('bdChangeHint'),
+              errorText: _short ? context.tr('bdChangeShort') : null,
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(context.tr('bdNotNow')),
+        ),
+        TextButton(
+          key: const Key('change-send'),
+          onPressed: () {
+            final text = _text.text.trim();
+            if (text.length < 3) {
+              setState(() => _short = true);
+              return;
+            }
+            Navigator.of(context).pop(text);
+          },
+          child: Text(context.tr('bdChangeSend')),
+        ),
+      ],
     );
   }
 }

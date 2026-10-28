@@ -123,6 +123,49 @@ class QuoteSubmitter extends ChangeNotifier {
     }
   }
 
+  /// Changes the worker's live quote (`PATCH /workers/me/quotes/:id`); the server prices it again. Returns the quote, or null with [failure] set.
+  Future<WorkerQuote?> revise(
+    String requestId,
+    WorkerQuote quote,
+    SubmitQuoteRequest request,
+  ) => _change(
+    requestId,
+    (t) => api.updateWorkerQuote(t, quote.id, request),
+    invalid: request.priceHalalas <= 0,
+  );
+
+  /// Takes the quote back (`POST /workers/me/quotes/:id/withdraw`). Returns the withdrawn quote, or null with [failure] set.
+  Future<WorkerQuote?> withdraw(String requestId, WorkerQuote quote) =>
+      _change(requestId, (t) => api.withdrawWorkerQuote(t, quote.id));
+
+  Future<WorkerQuote?> _change(
+    String requestId,
+    Future<WorkerQuote> Function(String token) call, {
+    bool invalid = false,
+  }) {
+    final running = _running[requestId];
+    if (running != null) return running;
+    final future =
+        (() async {
+          _failure = null;
+          if (invalid) return _fail(const QuoteFailure(QuoteProblem.invalidPrice));
+          try {
+            final changed = await auth.authorized(call);
+            jobs.recordQuote(requestId, changed);
+            _sent[requestId] = changed;
+            return changed;
+          } on ApiException catch (e) {
+            return _fail(_classify(e));
+          }
+        })().whenComplete(() {
+          _running.remove(requestId);
+          notifyListeners();
+        });
+    _running[requestId] = future;
+    notifyListeners();
+    return future;
+  }
+
   /// The quote is already there (an earlier attempt got through): show it instead of failing.
   Future<WorkerQuote?> _adopt(String requestId, ApiException original) async {
     try {

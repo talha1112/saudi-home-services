@@ -8,10 +8,13 @@ import '../../../core/extensions/context_extensions.dart';
 import '../../../core/utils/saudi_time.dart';
 import '../../../core/utils/text_styles.dart';
 import '../../../shared/components/cards.dart';
+import '../../../shared/components/confirm_sheet.dart';
+import '../../../shared/components/sheets.dart';
 import '../../../shared/widgets/app_button.dart';
 import '../../../shared/widgets/app_icon.dart';
 import '../../../shared/widgets/tiles.dart';
 import '../../quotes/widgets/quote_money_card.dart';
+import '../widgets/request_photos.dart';
 
 /// An open request, as the backend shows it to this worker: what, when, and the AREA only. The street address, the exact point and the
 /// customer's name and phone are not part of the response until the customer has paid, so there is nothing to show here (and no map).
@@ -56,6 +59,36 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
       if (!mounted) return;
       setState(() => _load = e.status == 404 ? _Load.gone : _Load.failed);
     }
+  }
+
+  /// Asks first: a withdrawn quote cannot be sent again on the same request.
+  void _confirmWithdraw(WorkerRequest r, WorkerQuote quote) {
+    final quotes = JobsScope.of(context).quotes;
+    final messenger = ScaffoldMessenger.of(context);
+    final failed = context.tr('weOther');
+    final done = context.tr('wjQuoteWithdrawn');
+    showAppSheet<void>(
+      context,
+      builder: (_) => ConfirmSheetBody(
+        icon: 'alert',
+        title: context.tr('wjWithdrawTitle'),
+        description: context.tr('wjWithdrawSub'),
+        cancelLabel: context.tr('wjKeepQuote'),
+        confirmLabel: context.tr('wjWithdrawQuote'),
+        tileBg: AppColors.dangerBg,
+        tileFg: AppColors.danger,
+        confirmColor: AppColors.danger,
+        onConfirm: () async {
+          final result = await quotes.withdraw(r.id, quote);
+          messenger.showSnackBar(
+            SnackBar(content: Text(result == null ? failed : done)),
+          );
+          if (result != null && mounted) {
+            _fetch(); // show the quote as it is now
+          }
+        },
+      ),
+    );
   }
 
   @override
@@ -179,6 +212,8 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
                           key: const Key('request-photos'),
                           style: ts(13, c: AppColors.slate),
                         ),
+                        const SizedBox(height: 10),
+                        RequestPhotos(bookingId: r.id, photoIds: r.photoIds),
                       ],
                       const SizedBox(height: 16),
                       Container(
@@ -208,6 +243,42 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
                       ),
                       if (quote != null) ...[
                         const SizedBox(height: 16),
+                        if (quote.isLive &&
+                            quote.changeRequest != null &&
+                            quote.changeRequest!.isNotEmpty) ...[
+                          Container(
+                            key: const Key('quote-change-request'),
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: AppColors.cream,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  context.tr('wjChangeAsked'),
+                                  style: ts(
+                                    13.5,
+                                    w: 700,
+                                    c: AppColors.creamText,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  quote.changeRequest!,
+                                  style: ts(14, h: 1.5),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  context.tr('wjChangeHint'),
+                                  style: ts(12.5, c: AppColors.creamText),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
                         QuoteMoneyCard(quote: quote),
                       ],
                     ],
@@ -219,6 +290,45 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
                       key: const Key('request-send-quote'),
                       label: context.tr('wjSendQuote'),
                       onPressed: () => AppRouter.toSendQuote(context, r),
+                    ),
+                  ),
+                if (quote != null && quote.isLive)
+                  BottomBar(
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: AppButton(
+                            key: const Key('quote-edit'),
+                            label: context.tr('wjEditQuote'),
+                            kind: AppButtonKind.soft,
+                            height: 48,
+                            radius: 15,
+                            fontSize: 14,
+                            onPressed: () async {
+                              await AppRouter.toSendQuote(
+                                context,
+                                r,
+                                existing: quote,
+                              );
+                              if (mounted) {
+                                _fetch(); // show the quote as it is now
+                              }
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: AppButton(
+                            key: const Key('quote-withdraw'),
+                            label: context.tr('wjWithdrawQuote'),
+                            kind: AppButtonKind.outline,
+                            height: 48,
+                            radius: 15,
+                            fontSize: 14,
+                            onPressed: () => _confirmWithdraw(r, quote),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
               ],

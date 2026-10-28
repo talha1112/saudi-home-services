@@ -59,7 +59,7 @@ const TABS = [
 ];
 const EVENT_LABEL: Record<string, string> = {
   BOOKING_CREATED: "Requested", QUOTE_SUBMITTED: "Quote received", QUOTE_REVISED: "Quote updated", QUOTE_WITHDRAWN: "Quote withdrawn", QUOTE_ACCEPTED: "Quote accepted",
-  QUOTE_REJECTED: "Quote not chosen", QUOTE_EXPIRED: "Quote expired", PAYMENT_CONFIRMED: "Payment confirmed", WORK_STARTED: "Work started", WORK_COMPLETED: "Work completed",
+  QUOTE_REJECTED: "Quote not chosen", QUOTE_CHANGE_REQUESTED: "Change requested", QUOTE_EXPIRED: "Quote expired", PAYMENT_CONFIRMED: "Payment confirmed", WORK_STARTED: "Work started", WORK_COMPLETED: "Work completed",
   BOOKING_CANCELLED: "Cancelled", BOOKING_EXPIRED: "Request expired",
 };
 

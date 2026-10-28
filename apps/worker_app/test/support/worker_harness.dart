@@ -194,6 +194,7 @@ WorkerRequest request({
   problemDescription:
       description ?? 'Two split units, weak cooling and water dripping',
   photoCount: photos,
+  photoIds: [for (var i = 0; i < photos; i++) 'photo-$i'],
 );
 
 WorkerJob job({

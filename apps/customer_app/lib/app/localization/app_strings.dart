@@ -680,6 +680,70 @@ const Map<String, Bi> kStrings = {
   'bdSec': Bi('s', 'ث'),
   'bdMin': Bi('min', 'د'),
 
+  // Rejecting a quote, asking for a change, cancelling, live status
+  'bdReject': Bi('Reject quote', 'رفض العرض'),
+  'bdRejectTitle': Bi('Reject this quote?', 'رفض هذا العرض؟'),
+  'bdRejectBody': Bi(
+    'The professional is told their quote was not chosen. The other quotes stay open.',
+    'سيُبلَّغ الفني بأن عرضه لم يُختر. تبقى العروض الأخرى متاحة.',
+  ),
+  'bdRejectConfirm': Bi('Reject', 'رفض'),
+  'bdRejected': Bi('Quote rejected', 'تم رفض العرض'),
+  'bdChange': Bi('Request change', 'طلب تعديل'),
+  'bdChangeTitle': Bi('Ask for a change', 'طلب تعديل على العرض'),
+  'bdChangeBody': Bi(
+    'Tell the professional what to change. They can update the quote and you will see the new offer here.',
+    'أخبر الفني بما تريد تعديله. يمكنه تحديث العرض وسيظهر لك العرض الجديد هنا.',
+  ),
+  'bdChangeHint': Bi(
+    'e.g. Can you come earlier, or lower the price?',
+    'مثال: هل يمكنك الحضور مبكراً أو تخفيض السعر؟',
+  ),
+  'bdChangeSend': Bi('Send request', 'إرسال الطلب'),
+  'bdChangeShort': Bi('Write at least 3 characters.', 'اكتب 3 أحرف على الأقل.'),
+  'bdChangeSent': Bi(
+    'Change requested: “{m}”. The professional was notified.',
+    'تم طلب التعديل: «{m}». تم إشعار الفني.',
+  ),
+  'bdCancelNote': Bi(
+    'Your professional will be told right away.',
+    'سيتم إبلاغ الفني فوراً.',
+  ),
+  'bdCancelDone': Bi('Booking cancelled', 'تم إلغاء الحجز'),
+  'bdCancelFailed': Bi(
+    'The booking could not be cancelled. Please try again.',
+    'تعذّر إلغاء الحجز. حاول مرة أخرى.',
+  ),
+  'bdCr1': Bi('I changed my mind', 'غيّرت رأيي'),
+  'bdCr2': Bi('Found another provider', 'وجدت مزوداً آخر'),
+  'bdCr3': Bi('The price is too high', 'السعر مرتفع'),
+  'bdCr4': Bi('The time no longer suits me', 'الموعد لم يعد مناسباً'),
+  'bdCr5': Bi('The problem is solved', 'تم حل المشكلة'),
+  'bdEtaMin': Bi('{n} min', '{n} د'),
+  'bdEtaNote': Bi(
+    'Estimated from your professional\u2019s position.',
+    'تقدير مبني على موقع الفني.',
+  ),
+
+  // Problem photos
+  'phTitle': Bi('Photos', 'الصور'),
+  'phCamera': Bi('Take a photo', 'التقاط صورة'),
+  'phGallery': Bi('Choose from gallery', 'اختيار من المعرض'),
+  'phAdd': Bi('Add photos', 'إضافة صور'),
+  'phHint': Bi(
+    'Optional. Up to {n} photos help professionals quote accurately.',
+    'اختياري. حتى {n} صور تساعد الفنيين على التسعير بدقة.',
+  ),
+  'phRemove': Bi('Remove photo', 'إزالة الصورة'),
+  'phTooBig': Bi(
+    'A photo over 8 MB was left out.',
+    'تم تجاهل صورة حجمها أكبر من 8 ميغابايت.',
+  ),
+  'phFailed': Bi(
+    '{n} photo(s) could not be attached. Your request was still sent.',
+    'تعذّر إرفاق {n} صورة. تم إرسال طلبك مع ذلك.',
+  ),
+
   // Notifications, profile, offers and support
   'ntTitle': Bi('Notifications', 'الإشعارات'),
   'ntMarkAll': Bi('Mark all read', 'تعليم الكل كمقروء'),

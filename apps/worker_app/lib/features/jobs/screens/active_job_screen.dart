@@ -8,6 +8,7 @@ import 'dart:async';
 import '../../../app/jobs_scope.dart';
 import '../../../app/router/app_router.dart';
 import '../../messages/widgets/chat_target.dart';
+import '../../requests/widgets/request_photos.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../../core/extensions/context_extensions.dart';
 import '../../../core/utils/saudi_time.dart';
@@ -134,8 +135,10 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
     final messenger = ScaffoldMessenger.of(context);
     // decide from the job as it is NOW (the button on screen may be a moment old)
     final current = jobs.jobById(job.id) ?? job;
-    if (!current.canStart && !current.canComplete) return;
-    final outcome = current.canStart
+    if (!current.canArrive && !current.canStart && !current.canComplete) return;
+    final outcome = current.canArrive
+        ? await jobs.arrived(current.id)
+        : current.canStart
         ? await jobs.startJob(current.id)
         : await jobs.completeJob(current.id);
     if (!mounted) return;
@@ -208,7 +211,9 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
     final place = job.location;
     final paid = job.status != 'PAYMENT_PENDING';
     final acting = jobs.isActing(job.id);
-    final actionLabel = job.canStart
+    final actionLabel = job.canArrive
+        ? context.tr('wjArrived')
+        : job.canStart
         ? context.tr('wjStartJob')
         : (job.canComplete ? context.tr('wjCompleteJob') : null);
     final contact = job.customerName ?? '';
@@ -325,6 +330,14 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
                             style: ts(13.5, c: AppColors.slate),
                           ),
                           _SharingLine(job: job),
+                          if (job.canStart && job.arrivedAt != null) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              context.tr('wjArrivedSaid'),
+                              key: const Key('arrived-note'),
+                              style: ts(12.5, c: AppColors.primary),
+                            ),
+                          ],
                           const SizedBox(height: 14),
                           if (!paid) ...[
                             Container(
@@ -539,6 +552,13 @@ class _ActiveJobScreenState extends State<ActiveJobScreen> {
                             Text(
                               job.problemDescription!,
                               style: ts(14, h: 1.5),
+                            ),
+                          ],
+                          if (job.photoIds.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            RequestPhotos(
+                              bookingId: job.id,
+                              photoIds: job.photoIds,
                             ),
                           ],
                           if (job.money != null) ...[

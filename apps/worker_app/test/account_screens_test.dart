@@ -333,7 +333,7 @@ void main() {
     );
 
     testWidgets(
-      'invents nothing: no payout account, no plan, no made-up reviews or ratings',
+      'invents nothing: no payout account, no made-up reviews or ratings; the subscription row opens its screen',
       (tester) async {
         await _open(
           tester,
@@ -343,7 +343,8 @@ void main() {
         );
         expect(find.textContaining('0932'), findsNothing);
         expect(find.text('Payout account'), findsNothing);
-        expect(find.text('Subscription'), findsNothing);
+        expect(find.byKey(const Key('profile-row-tag')), findsOneWidget);
+        expect(find.text('Subscription'), findsOneWidget);
         expect(find.text('PRO'), findsNothing);
         expect(find.text('Noura A.'), findsNothing);
         expect(find.text('4.9'), findsNothing);

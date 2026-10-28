@@ -518,6 +518,7 @@ enum BookingEventType {
   QUOTE_ACCEPTED
   QUOTE_REJECTED
   QUOTE_EXPIRED
+  QUOTE_CHANGE_REQUESTED
   PAYMENT_CONFIRMED
   WORK_STARTED
   WORK_COMPLETED
@@ -587,6 +588,8 @@ model Booking {
   /// Payment must be confirmed before this moment (enforced by the payments phase).
   paymentDueAt    DateTime? @map("payment_due_at") @db.Timestamptz(3)
   confirmedAt     DateTime? @map("confirmed_at") @db.Timestamptz(3)
+  /// When the worker said they had reached the customer (CONFIRMED only; a step before starting the work, not a status).
+  arrivedAt       DateTime? @map("arrived_at") @db.Timestamptz(3)
   startedAt       DateTime? @map("started_at") @db.Timestamptz(3)
   completedAt     DateTime? @map("completed_at") @db.Timestamptz(3)
   cancelledAt     DateTime? @map("cancelled_at") @db.Timestamptz(3)
@@ -666,6 +669,10 @@ model Quote {
   isAccepted  Boolean?  @map("is_accepted")
   acceptedAt  DateTime? @map("accepted_at") @db.Timestamptz(3)
   withdrawnAt DateTime? @map("withdrawn_at") @db.Timestamptz(3)
+
+  /// What the customer asked the worker to change in this quote; cleared when the worker edits the quote.
+  changeRequest     String?   @map("change_request") @db.VarChar(500)
+  changeRequestedAt DateTime? @map("change_requested_at") @db.Timestamptz(3)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)

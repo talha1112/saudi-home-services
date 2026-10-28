@@ -35,8 +35,12 @@ export const NOTIFICATION_TEMPLATES = {
     ar: { title: 'تم قبول عرضك', body: 'قبل العميل عرضك على الحجز {ref}. بانتظار الدفع.' },
   },
   'quote.rejected': {
-    en: { title: 'Your quote was not chosen', body: 'The customer chose another quote for booking {ref}.' },
-    ar: { title: 'لم يتم اختيار عرضك', body: 'اختار العميل عرضاً آخر للحجز {ref}.' },
+    en: { title: 'Your quote was not chosen', body: 'The customer did not choose your quote for booking {ref}.' },
+    ar: { title: 'لم يتم اختيار عرضك', body: 'لم يختر العميل عرضك على الحجز {ref}.' },
+  },
+  'quote.change_requested': {
+    en: { title: 'The customer asked for a change', body: 'The customer asked you to change your quote for booking {ref}. Open the request to read it.' },
+    ar: { title: 'طلب العميل تعديلاً', body: 'طلب منك العميل تعديل عرضك على الحجز {ref}. افتح الطلب لقراءته.' },
   },
   'payment.confirmed': {
     en: { title: 'Payment confirmed', body: 'Payment for booking {ref} is confirmed.' },

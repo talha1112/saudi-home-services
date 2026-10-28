@@ -116,10 +116,15 @@ abstract final class AppRouter {
   }
 
   /// After the backend created the request: drop the booking flow from the stack and show what it answered.
-  static void toBookingSent(BuildContext context, BookingView booking) {
+  static void toBookingSent(
+    BuildContext context,
+    BookingView booking, {
+    int photosFailed = 0,
+  }) {
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute<void>(
-        builder: (_) => BookingSentScreen(booking: booking),
+        builder: (_) =>
+            BookingSentScreen(booking: booking, photosFailed: photosFailed),
         settings: const RouteSettings(name: '/booking-sent'),
       ),
       (route) => route.settings.name == home,

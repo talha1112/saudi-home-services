@@ -168,7 +168,9 @@ class _AppState extends State<App> with WidgetsBindingObserver {
       final id = e.resourceId!;
       final arabic = _state.isArabic;
       try {
-        if (e.type == 'request.new' || e.type == 'quote.rejected') {
+        if (e.type == 'request.new' ||
+            e.type == 'quote.rejected' ||
+            e.type == 'quote.change_requested') {
           final request = await _jobs.requestDetail(id);
           final here = _overlay();
           if (here != null && here.mounted) {

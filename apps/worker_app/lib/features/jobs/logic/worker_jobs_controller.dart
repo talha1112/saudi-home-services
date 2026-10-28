@@ -121,6 +121,17 @@ class WorkerJobsController extends ChangeNotifier {
   Future<WorkerRequest> requestDetail(String id) =>
       auth.authorized((t) => api.workerRequest(t, id));
 
+  /// A short-lived link to one photo of a request (or of an assigned job), or null when it cannot be had right now.
+  Future<String?> photoUrl(String bookingId, String photoId) async {
+    try {
+      return await auth.authorized(
+        (t) => api.workerRequestPhotoUrl(t, bookingId, photoId),
+      );
+    } on ApiException {
+      return null;
+    }
+  }
+
   /// Reloads one assigned job and puts it in the list. Throws the backend's [ApiException] (404 for a booking that is not this worker's).
   Future<WorkerJob> reloadJob(String id) async {
     final job = await auth.authorized((t) => api.workerJob(t, id));
@@ -147,10 +158,15 @@ class WorkerJobsController extends ChangeNotifier {
       createdAt: r.createdAt,
       problemDescription: r.problemDescription,
       photoCount: r.photoCount,
+      photoIds: r.photoIds,
     );
     _requests.items = [...requests]..[i] = updated;
     notifyListeners();
   }
+
+  /// The worker says they reached the customer (a paid job that has not started). Taps while it is running share one request.
+  Future<JobActionOutcome> arrived(String id) =>
+      _act(id, 'arrived', (t) => api.arrivedWorkerJob(t, id));
 
   /// CONFIRMED -> IN_PROGRESS. Taps while it is running share one request.
   Future<JobActionOutcome> startJob(String id) =>

@@ -16,6 +16,7 @@ enum _Kind { ok, bad, warn }
   'request.new' => ('wrench', _Kind.ok),
   'quote.accepted' => ('check', _Kind.ok),
   'quote.rejected' => ('tag', _Kind.warn),
+  'quote.change_requested' => ('message', _Kind.warn),
   'payment.confirmed' => ('card', _Kind.ok),
   'booking.cancelled' || 'booking.expired' => ('x', _Kind.bad),
   'chat.message' => ('message', _Kind.ok),

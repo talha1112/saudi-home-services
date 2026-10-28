@@ -115,9 +115,13 @@ class LiveWorkerMap extends StatefulWidget {
     this.mapBuilder = googleLiveMap,
     this.mapsEnabled,
     this.interval = const Duration(seconds: 5),
+    this.controller,
   });
 
   final String bookingId;
+
+  /// The position source, when the parent also needs it (it then owns and disposes it). Without one, the map makes its own.
+  final WorkerPositionController? controller;
 
   /// The booking's own address, if it has an exact point.
   final LatLng? destination;
@@ -137,14 +141,15 @@ class _LiveWorkerMapState extends State<LiveWorkerMap> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _c ??= BookingScope.of(
-      context,
-    ).positionFor(widget.bookingId, widget.interval)..start();
+    _c ??=
+        widget.controller ??
+        (BookingScope.of(context).positionFor(widget.bookingId, widget.interval)
+          ..start());
   }
 
   @override
   void dispose() {
-    _c?.dispose();
+    if (widget.controller == null) _c?.dispose();
     super.dispose();
   }
 

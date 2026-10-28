@@ -34,8 +34,11 @@ class StageBars extends StatelessWidget {
 
 /// Vertical timeline of booking stages with timestamps.
 class StatusTimeline extends StatelessWidget {
-  const StatusTimeline({super.key, required this.stage});
+  const StatusTimeline({super.key, required this.stage, this.times});
   final int stage;
+
+  /// The time to show on each stage (an empty text shows none). Without it the prototype's fixed times are used.
+  final List<String>? times;
 
   @override
   Widget build(BuildContext context) {
@@ -45,7 +48,9 @@ class StatusTimeline extends StatelessWidget {
         for (var i = 0; i < kStages.length; i++)
           _Row(
             label: context.l(kStages[i].label),
-            time: i <= stage ? context.l(kStages[i].time) : '',
+            time: i > stage
+                ? ''
+                : (times != null ? times![i] : context.l(kStages[i].time)),
             done: i < stage || (isDone && i == 6),
             current: i == stage && !isDone,
             reached: i <= stage,

@@ -46,14 +46,27 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.showLanguage) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) showLanguageDialog(context);
-      });
-    }
   }
 
   bool _busy = false;
+  bool _languageShown = false;
+
+  /// The language picker opens only for someone who has to sign in: with a saved session it would cover this screen and hold back the
+  /// automatic continuation.
+  void _maybeAskLanguage() {
+    final auth = _auth;
+    if (!widget.showLanguage ||
+        _languageShown ||
+        auth == null ||
+        auth.status == AuthStatus.unknown ||
+        auth.isSignedIn) {
+      return;
+    }
+    _languageShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !(_auth?.isSignedIn ?? false)) showLanguageDialog(context);
+    });
+  }
   AuthController? _auth;
 
   @override
@@ -69,6 +82,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   /// A saved session that is restored in the background continues straight to where this worker belongs.
   void _resume() {
+    _maybeAskLanguage();
     final user = _auth?.user;
     if (!mounted || _busy || user == null || _auth?.isSignedIn != true) {
       return;
