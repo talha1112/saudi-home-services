@@ -108,6 +108,17 @@ run('offers: administration, eligibility and no financial effect (real PostgreSQ
       expect((await patch(o.id, { titleEn: null, titleAr: null })).body.code).toBe('TITLE_REQUIRED');
     });
 
+    it('deletes an offer in any status: gone from the admin list and from people at once, with an audit record', async () => {
+      const o = (await create().expect(201)).body;
+      await act(o.id, 'publish').expect(200);
+      expect((await h.api().delete(`/api/v1/admin/offers/${o.id}`).set(as(customer)).send()).status).toBe(403);
+      await h.api().delete(`/api/v1/admin/offers/${o.id}`).set(as(admin)).expect(204);
+      await h.api().get(`/api/v1/admin/offers/${o.id}`).set(as(admin)).expect(404);
+      await h.api().delete(`/api/v1/admin/offers/${o.id}`).set(as(admin)).expect(404);
+      expect(await h.prisma.offerEvent.count({ where: { offerId: o.id } })).toBe(0);
+      expect(await h.prisma.auditLog.count({ where: { action: 'offer.deleted', entityId: o.id } })).toBe(1);
+    });
+
     it('refuses to publish an incomplete offer or one that already ended', async () => {
       const noDescription = (await create({ descriptionEn: undefined, descriptionAr: undefined }).expect(201)).body;
       const res = await act(noDescription.id, 'publish');

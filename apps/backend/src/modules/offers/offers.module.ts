@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Module, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Module, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '../../common/auth/authenticated-user.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
@@ -39,6 +39,13 @@ export class AdminOffersController {
   @ApiOperation({ summary: 'Edit a DRAFT or PAUSED offer' })
   update(@CurrentUser() admin: AuthenticatedUser, @Param('id', uuid()) id: string, @Body() dto: UpdateOfferDto) {
     return this.offers.update(admin, id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete an offer (any status). It disappears from the apps at once.' })
+  async remove(@CurrentUser() admin: AuthenticatedUser, @Param('id', uuid()) id: string): Promise<void> {
+    await this.offers.remove(admin, id);
   }
 
   @Post(':id/publish')

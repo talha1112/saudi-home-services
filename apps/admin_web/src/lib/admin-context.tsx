@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { TODAY, addDays, rangeToIso } from "@/lib/format";
 import type { CityFilter } from "@/types";
 
-export type ModalName = "service" | "rules" | null;
+export type ModalName = "service" | "category" | "rules" | null;
 
 export interface CityOption {
   id: string;

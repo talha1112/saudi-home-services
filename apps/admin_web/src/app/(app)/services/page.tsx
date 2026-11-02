@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Field, StaticBox, TextArea, TextInput } from "@/components/forms/fields";
 import { badge, num, text, type Column } from "@/components/tables/cells";
 import { ServerTablePage, type ServerFilter } from "@/components/tables/ServerTablePage";
@@ -13,7 +13,7 @@ import { fmt, sarH } from "@/lib/format";
 
 const COLUMNS: Column[] = [
   { label: "Service", w: 2.4 }, { label: "Category", w: 1.1 }, { label: "Min. charge", w: 1, align: "end" }, { label: "Commission", w: 0.9, align: "end" },
-  { label: "Avg. quote", w: 1, align: "end" }, { label: "Bookings", w: 0.9, align: "end" }, { label: "Status", w: 0.9 },
+  { label: "Avg. quote", w: 1, align: "end" }, { label: "Bookings", w: 0.9, align: "end" }, { label: "Status", w: 0.9 }, { label: "", w: 0.6 },
 ];
 
 /** The edit form for one service. It is remounted (keyed) whenever another service is chosen or the saved one changes, so its fields start from the saved values. */
@@ -84,6 +84,7 @@ export default function ServicesPage() {
   const { categories, services, stats, pricing } = useCatalog(version);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const editorTop = useRef<HTMLDivElement>(null);
 
   const cats = categories.data?.items ?? [];
   const list = services.data?.items ?? [];
@@ -111,6 +112,10 @@ export default function ServicesPage() {
 
   const block = (
     <>
+      <div className="flex items-center justify-between">
+        <div className="text-[15.5px] font-bold">Categories</div>
+        <Button variant="outline" icon="plus" className="!h-[38px] !rounded-[11px] !px-3.5 !text-[13px]" onClick={() => openModal("category")}>Add category</Button>
+      </div>
       <div className="grid grid-cols-3 gap-3.5">
         {cats.map((c) => {
           const inCat = list.filter((s) => s.categoryId === c.id);
@@ -132,6 +137,7 @@ export default function ServicesPage() {
         })}
       </div>
       {error && <div role="alert" className="rounded-xl border border-danger-line bg-danger-bg px-4 py-3 text-[13.5px] text-danger">{error}</div>}
+      <div ref={editorTop} className="scroll-mt-4" />
       {current ? (
         <Editor
           key={`${current.id}-${current.nameEn}-${current.nameAr}-${current.descriptionEn}-${current.descriptionAr}-${current.categoryId}-${current.isActive}`}
@@ -155,10 +161,10 @@ export default function ServicesPage() {
       path="services"
       columns={COLUMNS}
       idOf={(s) => s.id}
-      onSelect={(s) => { setSelected(s.id); setError(null); }}
+      onSelect={(s) => { setSelected(s.id); setError(null); editorTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
       toRow={(x) => {
         const st = serviceStats.get(x.id);
-        return { key: x.id, cells: [text(x.nameEn, x.nameAr, { fw: 600 }), text(catName.get(x.categoryId) ?? "—"), num(min), num(rate), num(st?.averageQuoteHalalas ? sarH(st.averageQuoteHalalas) : "—"), num(fmt(st?.bookings ?? 0)), badge(x.isActive ? "Active" : "Inactive", x.isActive ? "ok" : "neutral")] };
+        return { key: x.id, cells: [text(x.nameEn, x.nameAr, { fw: 600 }), text(catName.get(x.categoryId) ?? "—"), num(min), num(rate), num(st?.averageQuoteHalalas ? sarH(st.averageQuoteHalalas) : "—"), num(fmt(st?.bookings ?? 0)), badge(x.isActive ? "Active" : "Inactive", x.isActive ? "ok" : "neutral"), text("Edit", undefined, { fw: 700, fg: "#00695C" })] };
       }}
       footerBase={(shown, total) => `${total} services · ${cats.length} categories${shown < total ? ` · showing ${shown}` : ""}`}
     />

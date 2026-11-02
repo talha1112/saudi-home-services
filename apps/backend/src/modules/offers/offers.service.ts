@@ -118,6 +118,14 @@ export class OffersService {
     return view;
   }
 
+  /** Removes an offer for good (its own history goes with it; the shared audit log keeps a record). People stop seeing it at once. */
+  async remove(admin: AuthenticatedUser, id: string): Promise<void> {
+    const current = await this.prisma.offer.findUnique({ where: { id }, select: { id: true, status: true } });
+    if (!current) throw notFound();
+    await this.prisma.offer.delete({ where: { id } });
+    await this.auditAction(admin, 'deleted', id, { beforeStatus: current.status });
+  }
+
   async adminList(q: AdminListOffersQueryDto, now: Date = new Date()): Promise<Page<ReturnType<OffersService['adminView']>>> {
     const phase: Prisma.OfferWhereInput =
       q.phase === 'ACTIVE' ? { status: 'PUBLISHED', startsAt: { lte: now }, endsAt: { gt: now } } : q.phase === 'SCHEDULED' ? { status: 'PUBLISHED', startsAt: { gt: now } } : q.phase === 'EXPIRED' ? { status: 'PUBLISHED', endsAt: { lte: now } } : {};

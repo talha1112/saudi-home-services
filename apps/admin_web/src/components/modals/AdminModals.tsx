@@ -16,8 +16,62 @@ const digits = (v: string, max: number) => v.replace(/\D/g, "").slice(0, max);
 export function AdminModals() {
   const { modal } = useAdmin();
   if (modal === "service") return <AddServiceModal />;
+  if (modal === "category") return <AddCategoryModal />;
   if (modal === "rules") return <EditRulesModal />;
   return null;
+}
+
+/** The icons the apps have for a category (an unknown key shows the generic tool). */
+const CATEGORY_ICONS = [
+  { key: "wrench", label: "General" }, { key: "bolt", label: "Electrical" }, { key: "droplet", label: "Plumbing" }, { key: "snowflake", label: "Cooling" }, { key: "home", label: "Home" },
+];
+
+function AddCategoryModal() {
+  const { openModal, showToast, bump } = useAdmin();
+  const [f, setF] = useState({ en: "", ar: "", icon: "wrench", status: "Active" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ok = !busy && f.en.trim().length >= 2 && f.ar.trim().length >= 2;
+
+  async function submit() {
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post("service-categories", { slug: slugify(f.en), nameEn: f.en.trim(), nameAr: f.ar.trim(), iconKey: f.icon, isActive: f.status === "Active" });
+      openModal(null);
+      showToast(`${f.en.trim()} ${f.status === "Active" ? "added to the app" : "saved as inactive"}`);
+      bump();
+    } catch (e) {
+      setError(describeError(e));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Add category" subtitle="A group of services in the customer app. Add services to it afterwards. English and Arabic names are both required." icon="sliders" width={620} hint={error ?? (ok ? "Ready" : "Fill in both names")} cta={busy ? "Saving…" : f.status === "Active" ? "Add category" : "Save inactive"} canSubmit={ok} onClose={() => openModal(null)} onSubmit={() => void submit()}>
+      <div className="grid grid-cols-2 gap-3.5">
+        <Field label="Category name (English) *">
+          <TextInput value={f.en} onChange={(en) => setF({ ...f, en })} placeholder="e.g. Cleaning" />
+        </Field>
+        <Field label="اسم الفئة (عربي) *" rtl>
+          <TextInput rtl value={f.ar} onChange={(ar) => setF({ ...f, ar })} placeholder="مثال: التنظيف" />
+        </Field>
+      </div>
+      <div className="flex flex-col gap-2">
+        <span className="text-[12.5px] font-semibold">Icon</span>
+        <div className="flex flex-wrap gap-2">
+          {CATEGORY_ICONS.map((i) => (
+            <Chip key={i.key} label={i.label} selected={f.icon === i.key} className="!h-[38px] !px-3.5" onClick={() => setF({ ...f, icon: i.key })} />
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[12.5px] font-semibold">Status</span>
+        <Segmented options={[{ value: "Active", label: "Active" }, { value: "Draft", label: "Inactive" }]} value={f.status} onChange={(status) => setF({ ...f, status })} />
+      </div>
+    </Modal>
+  );
 }
 
 function AddServiceModal() {
